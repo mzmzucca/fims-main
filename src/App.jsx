@@ -195,7 +195,8 @@ function AppContent() {
         ]);
 
         setInspections(savedInspections || genSeedInspections());
-        setUsers(savedUsers || SEED_USERS);
+        const dbUsers = await authService.getAllUsers();
+        setUsers(dbUsers.length > 0 ? dbUsers : (savedUsers || SEED_USERS));
         setLocations(savedLocations || SEED_LOCATIONS);
         setAuditLogs(savedLogs || []);
 
