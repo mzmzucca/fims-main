@@ -11,3 +11,13 @@ console.log("🔑 Supabase URL:", supabaseUrl);
 console.log("🔑 Supabase Key presente:", !!supabaseAnonKey);
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export const TABLES = {
+  USERS: 'fims_users',
+  LOCATIONS: 'fims_locations',
+  INSPECTIONS: 'fims_inspections',
+  LOGS: 'fims_logs',
+  NOTIFICATIONS: 'fims_notifications',
+  TEMPLATES: 'fims_templates',
+  TEMPLATE_CLIENTS: 'fims_template_clients'
+};
