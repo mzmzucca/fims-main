@@ -1,6 +1,6 @@
 // /src/pages/Management.jsx
 import { authService } from "../services/authService";
-import { dataStore } from "../lib/dataStore";
+import { dataStore } from "../lib/db";
 import { useState, useRef, useEffect } from "react";
 import { Icon } from "../lib/icons";
 import ScoreRing from "../components/ScoreRing";
