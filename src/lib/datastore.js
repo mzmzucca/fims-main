@@ -2,7 +2,7 @@
 const DB_NAME = "fims_data_db";
 const DB_VERSION = 1;
 const STORE_NAME = "app_data";
-// File with stress
+// Lets move
 let _dbPromise = null;
 
 function openDB() {
