@@ -1,6 +1,7 @@
-// /src/context/CommsContext.jsx
-import { createContext, useContext, useState, useEffect } from "react";
+// src/context/CommsContext.jsx
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { genId } from "../lib/helpers";
+import { notificationService } from "../services/notificationService";
 
 const CommsContext = createContext();
 
@@ -13,7 +14,7 @@ const STORAGE_KEYS = {
   DISMISSED: "fims_dismissed"
 };
 
-export function CommsProvider({ children }) {
+export function CommsProvider({ children, currentUser }) {
   const [messages, setMessages] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.MESSAGES);
     return saved ? JSON.parse(saved) : [];
@@ -39,14 +40,65 @@ export function CommsProvider({ children }) {
     return saved || "";
   });
 
+  // ============================================
+  // NOTIFICAÇÕES COM SUPABASE REALTIME
+  // ============================================
+  
+  // Carregar notificações do Supabase quando utilizador loga
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    async function loadNotifications() {
+      const supabaseNotifs = await notificationService.fetchForUser(currentUser.id);
+      if (supabaseNotifs.length > 0) {
+        // Mesclar com locais, removendo duplicados
+        setNotifications(prev => {
+          const existingIds = new Set(prev.map(n => n.id));
+          const newNotifs = supabaseNotifs.filter(n => !existingIds.has(n.id));
+          const merged = [...newNotifs, ...prev];
+          localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }
+
+    loadNotifications();
+
+    // Subscrever para notificações em tempo real
+    const unsubscribe = notificationService.subscribe(
+      currentUser.id,
+      (newNotif) => {
+        console.log('[CommsContext] Nova notificação recebida via Realtime:', newNotif);
+        setNotifications(prev => {
+          const updated = [newNotif, ...prev].slice(0, 100);
+          localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
+          return updated;
+        });
+        
+        // Mostrar notificação do browser se permitido
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('FIMS - Nova Notificação', {
+            body: newNotif.text,
+            icon: '/favicon.ico'
+          });
+        }
+      }
+    );
+
+    // Pedir permissão para notificações do browser
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
+    return () => {
+      unsubscribe();
+    };
+  }, [currentUser?.id]);
+
   // Persistir dados
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messages));
   }, [messages]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
-  }, [notifications]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(announcements));
@@ -78,7 +130,7 @@ export function CommsProvider({ children }) {
     return msg;
   };
 
-  // Enviar mensagem broadcast (para todos)
+  // Enviar mensagem broadcast
   const sendBroadcast = (fromId, text, roleFilter = null) => {
     const msg = {
       id: genId(),
@@ -158,32 +210,56 @@ export function CommsProvider({ children }) {
     );
   };
 
-  // Notificar usuário
-  const notify = (userId, text, link = null) => {
+  // ============================================
+  // NOTIFICAR - VERSÃO SIMPLIFICADA
+  // ============================================
+  const notify = useCallback(async (userId, text, link = null) => {
     const notif = {
       id: genId(),
-      userId,
+      userId: String(userId),
       text,
       timestamp: new Date().toISOString(),
       read: false,
       link
     };
-    setNotifications(prev => [notif, ...prev]);
+
+    // Adicionar localmente imediatamente
+    setNotifications(prev => {
+      const updated = [notif, ...prev].slice(0, 100);
+      try {
+        localStorage.setItem('fims_notifs', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    // Enviar para Supabase (sem fromUserId)
+    notificationService.send(userId, text, link).catch(err => {
+      console.warn('[CommsContext] Notificação não enviada ao Supabase:', err.message);
+    });
+
     return notif;
-  };
+  }, []);
 
   // Marcar notificação como lida
-  const markNotificationRead = (notifId) => {
+  const markNotificationRead = async (notifId) => {
     setNotifications(prev => prev.map(n => 
       n.id === notifId ? { ...n, read: true } : n
     ));
+    
+    // Atualizar no Supabase
+    if (currentUser?.id) {
+      await notificationService.markAsRead(notifId, currentUser.id);
+    }
   };
 
   // Marcar todas as notificações como lidas
-  const markAllRead = (userId) => {
+  const markAllNotificationsRead = async (userId) => {
     setNotifications(prev => prev.map(n => 
       n.userId === userId ? { ...n, read: true } : n
     ));
+    
+    // Atualizar no Supabase
+    await notificationService.markAllAsRead(userId);
   };
 
   // Limpar rascunho
@@ -192,11 +268,9 @@ export function CommsProvider({ children }) {
     localStorage.removeItem(STORAGE_KEYS.DRAFT);
   };
 
-  // ============================================================
-  // ANÚNCIOS (Broadcast com confirmação)
-  // ============================================================
-
-  // Criar anúncio
+  // ============================================
+  // ANÚNCIOS
+  // ============================================
   const createAnnouncement = (fromId, title, text, targetRole = null) => {
     const announcement = {
       id: genId(),
@@ -221,7 +295,6 @@ export function CommsProvider({ children }) {
     return announcement;
   };
 
-  // Marcar anúncio como visualizado (dismiss) - CORRIGIDO
   const dismissAnnouncement = (announcementId, userId) => {
     setAnnouncements(prev => {
       const updated = prev.map(a => {
@@ -234,13 +307,11 @@ export function CommsProvider({ children }) {
         }
         return a;
       });
-      // Salvar no localStorage imediatamente
       localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
       return updated;
     });
   };
 
-  // Obter anúncios não visualizados por um usuário - CORRIGIDO
   const getUnseenAnnouncements = (userId) => {
     return announcements.filter(a => {
       const dismissedBy = a.dismissedBy || [];
@@ -248,12 +319,9 @@ export function CommsProvider({ children }) {
     });
   };
 
-  // Marcar anúncio como visto com confirmação "OK Recebido" - CORRIGIDO
   const confirmAnnouncement = (announcementId, userId) => {
-    // Primeiro, marcar como visualizado
     dismissAnnouncement(announcementId, userId);
     
-    // Depois, enviar confirmação
     const announcement = announcements.find(a => a.id === announcementId);
     if (announcement) {
       const fromUser = JSON.parse(localStorage.getItem('fims_current_user') || '{}');
@@ -277,7 +345,6 @@ export function CommsProvider({ children }) {
     }
   };
 
-  // Enviar resposta a um anúncio
   const replyToAnnouncement = (announcementId, fromId, text) => {
     const announcement = announcements.find(a => a.id === announcementId);
     if (!announcement) return null;
@@ -304,7 +371,6 @@ export function CommsProvider({ children }) {
     return replyMsg;
   };
 
-  // Enviar mensagem para todos (broadcast)
   const broadcastMessage = (fromId, text) => {
     return sendBroadcast(fromId, text);
   };
@@ -324,7 +390,8 @@ export function CommsProvider({ children }) {
     markAsRead,
     markAllAsRead,
     markNotificationRead,
-    markAllRead,
+    markAllNotificationsRead,
+    markAllRead: markAllNotificationsRead,
     notify,
     clearDraft,
     createAnnouncement,
@@ -352,5 +419,4 @@ export function useComms() {
   return context;
 }
 
-// Exportar o contexto
 export { CommsContext };

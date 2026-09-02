@@ -1,9 +1,11 @@
-// /src/pages/InspectionForm.jsx
+// src/pages/InspectionForm.jsx
+// Substituir o componente inteiro
+
 import { useState, useEffect } from "react";
 import { Icon } from "../lib/icons";
 import { calcScore, isItemComplete, getCategoryHealth, generateAISummary } from "../lib/helpers";
 import { photoStore } from "../lib/photoStore";
-import { getClientTemplate } from "../data/constants";
+import { getClientTemplate, getClientTemplateAsync } from "../data/constants";
 import SignaturePad from "../components/SignaturePad";
 import PhotoUploader from "../components/PhotoUploader";
 import VoiceInput from "../components/VoiceInput";
@@ -11,14 +13,98 @@ import VoiceInput from "../components/VoiceInput";
 export default function InspectionForm({ inspection, onSave, onSubmit, onBack, allInspections }) {
   const draftKey = `fims_draft_${inspection.id}`;
 
-  const ensureTemplate = (insp) => {
-    if (!insp.items || insp.items.length === 0) {
-      const template = getClientTemplate(insp.location_name);
-      const templateSections = template.sections || [];
+  const [items, setItems] = useState([]);
+  const [sections, setSections] = useState([]);
+  const [notes, setNotes] = useState("");
+  const [expandedSections, setExpandedSections] = useState([]);
+  const [saved, setSaved] = useState(false);
+  const [photosByItem, setPhotosByItem] = useState({});
+  const [validationErrors, setValidationErrors] = useState(null);
+  const [showAIPanel, setShowAIPanel] = useState(false);
+  const [isLoadingTemplate, setIsLoadingTemplate] = useState(false);
+  const [templateSource, setTemplateSource] = useState("");
+
+  const [clientMgrName, setClientMgrName] = useState("");
+  const [inspectorSig, setInspectorSig] = useState("");
+  const [clientSig, setClientSig] = useState("");
+
+  const [gpsCoords, setGpsCoords] = useState(null);
+  const [showRefModal, setShowRefModal] = useState(null);
+  const [refPhotos, setRefPhotos] = useState([]);
+
+  // Carregar template - VERSÃO MELHORADA COM SUPABASE
+  useEffect(() => {
+    async function loadTemplate() {
+      // Verificar se a inspeção já tem items
+      if (inspection.items && inspection.items.length > 0) {
+        console.log('[InspectionForm] Usando items da inspeção');
+        setItems(inspection.items);
+        setSections(inspection.sections || []);
+        setTemplateSource("inspeção");
+        return;
+      }
+
+      // Verificar draft salvo
+      try {
+        const saved = localStorage.getItem(draftKey);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.items && parsed.items.length > 0) {
+            console.log('[InspectionForm] Usando draft salvo');
+            setItems(parsed.items);
+            setSections(parsed.sections || []);
+            setNotes(parsed.notes || "");
+            setClientMgrName(parsed.clientMgrName || "");
+            setInspectorSig(parsed.inspectorSig || "");
+            setClientSig(parsed.clientSig || "");
+            setTemplateSource("draft");
+            return;
+          }
+        }
+      } catch (e) {}
+
+      // Buscar template - PRIMEIRO LOCALSTORAGE, DEPOIS SUPABASE
+      setIsLoadingTemplate(true);
+      console.log('[InspectionForm] Buscando template para:', inspection.location_name);
       
-      return {
-        ...insp,
-        items: templateSections.flatMap(s => 
+      try {
+        const template = await getClientTemplateAsync(inspection.location_name);
+        
+        if (template && template.sections && template.sections.length > 0) {
+          const templateSections = template.sections;
+          const newItems = templateSections.flatMap(s => 
+            (s.items || []).map(item => ({ 
+              ...item, 
+              section_id: s.id, 
+              score: null, 
+              comment: "", 
+              photos: [] 
+            }))
+          );
+          const newSections = templateSections.map(s => ({ 
+            id: s.id, 
+            title: s.title || s.name,
+            observation: "", 
+            photos: [] 
+          }));
+          
+          console.log(`[InspectionForm] Template carregado: ${newItems.length} itens de ${templateSource || 'Supabase/local'}`);
+          setItems(newItems);
+          setSections(newSections);
+          setTemplateSource(template.clientId === 'DEFAULT' ? 'padrão' : 
+                           template.clientId === 'STATIC' ? 'estático' : 'Supabase');
+        } else {
+          console.warn('[InspectionForm] Template vazio ou inválido');
+          setItems([]);
+          setSections([]);
+          setTemplateSource("vazio");
+        }
+      } catch (error) {
+        console.error('[InspectionForm] Erro ao carregar template:', error);
+        // Fallback síncrono
+        const fallbackTemplate = getClientTemplate(inspection.location_name);
+        const templateSections = fallbackTemplate.sections || [];
+        setItems(templateSections.flatMap(s => 
           (s.items || []).map(item => ({ 
             ...item, 
             section_id: s.id, 
@@ -26,70 +112,42 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
             comment: "", 
             photos: [] 
           }))
-        ),
-        sections: templateSections.map(s => ({ 
+        ));
+        setSections(templateSections.map(s => ({ 
           id: s.id, 
           title: s.title || s.name,
           observation: "", 
           photos: [] 
-        }))
-      };
-    }
-    return insp;
-  };
-
-  const safeInspection = ensureTemplate(inspection);
-
-  const loadDraft = (field, fallback) => {
-    try {
-      const saved = localStorage.getItem(draftKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (field === "items" && Array.isArray(parsed[field]) && parsed[field].length === 0 && Array.isArray(fallback) && fallback.length > 0) return fallback;
-        return parsed[field] !== undefined ? parsed[field] : fallback;
+        })));
+        setTemplateSource("fallback");
+      } finally {
+        setIsLoadingTemplate(false);
       }
-    } catch (e) {}
-    return fallback;
-  };
-
-  const initialSections = () => {
-    let s = loadDraft("sections", safeInspection.sections || []);
-    return s;
-  };
-
-  const [items, setItems] = useState(() => loadDraft("items", safeInspection.items || []));
-  const [sections, setSections] = useState(() => initialSections());
-  const [notes, setNotes] = useState(() => loadDraft("notes", safeInspection.notes || ""));
-  const [expandedSections, setExpandedSections] = useState([]);
-  const [saved, setSaved] = useState(false);
-  const [photosByItem, setPhotosByItem] = useState({});
-  const [validationErrors, setValidationErrors] = useState(null);
-  const [showAIPanel, setShowAIPanel] = useState(false);
-
-  const [clientMgrName, setClientMgrName] = useState(() => loadDraft("clientMgrName", safeInspection.client_mgr_name || ""));
-  const [inspectorSig, setInspectorSig] = useState(() => loadDraft("inspectorSig", safeInspection.inspector_sig || ""));
-  const [clientSig, setClientSig] = useState(() => loadDraft("clientSig", safeInspection.client_sig || ""));
-
-  const [gpsCoords, setGpsCoords] = useState(safeInspection.gps_coords || null);
-  const [showRefModal, setShowRefModal] = useState(null);
-  const [refPhotos, setRefPhotos] = useState([]);
-
-  // Obter seções do template atual
-  const currentTemplate = getClientTemplate(safeInspection.location_name);
-  const templateSections = currentTemplate.sections || [];
-
-  // Expandir primeira seção por padrão
-  useEffect(() => {
-    if (templateSections.length > 0 && expandedSections.length === 0) {
-      setExpandedSections([templateSections[0].id]);
     }
-  }, [templateSections]);
 
+    loadTemplate();
+  }, [inspection.id, inspection.location_name]);
+
+  // Expandir primeira seção quando items carregam
   useEffect(() => {
-    const draftData = { items, sections, notes, clientMgrName, inspectorSig, clientSig };
-    localStorage.setItem(draftKey, JSON.stringify(draftData));
+    if (sections.length > 0 && expandedSections.length === 0) {
+      setExpandedSections([sections[0].id]);
+    }
+  }, [sections]);
+
+  // Salvar draft
+  useEffect(() => {
+    if (items.length > 0 || sections.length > 0) {
+      const draftData = { items, sections, notes, clientMgrName, inspectorSig, clientSig };
+      try {
+        localStorage.setItem(draftKey, JSON.stringify(draftData));
+      } catch (e) {
+        console.warn('[InspectionForm] Erro ao salvar draft:', e);
+      }
+    }
   }, [items, sections, notes, clientMgrName, inspectorSig, clientSig, draftKey]);
 
+  // GPS
   useEffect(() => {
     if (!gpsCoords && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -100,21 +158,23 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     }
   }, [gpsCoords]);
 
+  // Fotos
   useEffect(() => {
     let cancelled = false;
-    photoStore.listByInspection(safeInspection.id).then(grouped => {
+    photoStore.listByInspection(inspection.id).then(grouped => {
       if (cancelled) return;
       setPhotosByItem(grouped);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [safeInspection.id]);
+  }, [inspection.id]);
 
+  // Funções de atualização
   const setScore = (itemId, score) => setItems(prev => prev.map(i => i.id === itemId ? { ...i, score } : i));
   const setComment = (itemId, comment) => setItems(prev => prev.map(i => i.id === itemId ? { ...i, comment } : i));
   const setSectionObservation = (secId, text) => setSections(prev => prev.map(s => s.id === secId ? { ...s, observation: text } : s));
 
   const addPhoto = async (entityId, file) => {
-    const meta = await photoStore.add(safeInspection.id, entityId, file);
+    const meta = await photoStore.add(inspection.id, entityId, file);
     meta.url = URL.createObjectURL(file);
     setPhotosByItem(prev => ({ ...prev, [entityId]: [...(prev[entityId] || []), meta] }));
   };
@@ -126,7 +186,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
 
   const handleShowRefImage = (itemId) => {
     if (!allInspections) return;
-    const clientInsps = allInspections.filter(i => i.location_id === safeInspection.location_id && i.id !== safeInspection.id && i.score_pct !== null);
+    const clientInsps = allInspections.filter(i => i.location_id === inspection.location_id && i.id !== inspection.id && i.score_pct !== null);
     if (clientInsps.length === 0) return alert("No previous inspections found for this client.");
     const lastInsp = clientInsps.sort((a,b) => new Date(b.date) - new Date(a.date))[0];
     photoStore.listByInspection(lastInsp.id).then(grouped => {
@@ -140,7 +200,17 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   const totalItems = items.length;
 
   const handleSave = () => {
-    onSave({ ...safeInspection, items, sections, notes, status: "in_progress", client_mgr_name: clientMgrName, inspector_sig: inspectorSig, client_sig: clientSig, gps_coords: gpsCoords });
+    onSave({ 
+      ...inspection, 
+      items, 
+      sections, 
+      notes, 
+      status: "in_progress", 
+      client_mgr_name: clientMgrName, 
+      inspector_sig: inspectorSig, 
+      client_sig: clientSig, 
+      gps_coords: gpsCoords 
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -148,7 +218,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   const handleSubmit = () => {
     const errors = [];
     
-    templateSections.forEach(section => {
+    sections.forEach(section => {
       const sItems = items.filter(i => i.section_id === section.id);
       const secData = sections.find(s => s.id === section.id) || { observation: "" };
       const secErrors = [];
@@ -194,28 +264,90 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     const alertLevel = pct < 60 ? "critical" : pct < 75 ? "warning" : "ok";
     
     localStorage.removeItem(draftKey);
-    onSubmit({ ...safeInspection, items: clearedItems, sections, notes, status: "submitted", score_pct: pct, alert_level: alertLevel, client_mgr_name: clientMgrName, inspector_sig: inspectorSig, client_sig: clientSig, gps_coords: gpsCoords });
+    onSubmit({ 
+      ...inspection, 
+      items: clearedItems, 
+      sections, 
+      notes, 
+      status: "submitted", 
+      score_pct: pct, 
+      alert_level: alertLevel, 
+      client_mgr_name: clientMgrName, 
+      inspector_sig: inspectorSig, 
+      client_sig: clientSig, 
+      gps_coords: gpsCoords 
+    });
   };
 
   const toggleSection = (secId) => {
     setExpandedSections(prev => prev.includes(secId) ? prev.filter(id => id !== secId) : [...prev, secId]);
   };
 
-  const aiSummary = generateAISummary(items, safeInspection.location_name);
+  const aiSummary = generateAISummary(items, inspection.location_name);
+
+  // Estado de carregamento
+  if (isLoadingTemplate) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+        <div className="spinner"></div>
+        <p style={{ marginTop: 16, color: '#666' }}>Carregando template de inspeção...</p>
+        <p style={{ fontSize: 12, color: '#999' }}>{inspection.location_name}</p>
+      </div>
+    );
+  }
+
+  // Aviso se template está vazio
+  if (items.length === 0 && !isLoadingTemplate) {
+    return (
+      <div>
+        <button className="btn btn-secondary btn-sm" onClick={onBack} style={{ marginBottom: 16 }}>← Voltar</button>
+        <div className="card" style={{ padding: 24, textAlign: 'center', border: '2px solid #EF9F27' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <h3 style={{ color: '#EF9F27', marginBottom: 8 }}>Template Não Encontrado</h3>
+          <p style={{ color: '#666', marginBottom: 16 }}>
+            Não foi possível carregar os itens de inspeção para <strong>{inspection.location_name}</strong>.
+          </p>
+          <p style={{ fontSize: 12, color: '#999', marginBottom: 16 }}>
+            Fonte: {templateSource} | Verifique se o template existe no Supabase
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+            <button 
+              className="btn btn-primary" 
+              onClick={async () => {
+                setIsLoadingTemplate(true);
+                const { templateService } = await import('../services/templateService');
+                const template = await templateService.fetchTemplateByClientName(inspection.location_name);
+                if (template.success && template.template) {
+                  const s = template.template.sections;
+                  setItems(s.flatMap(sec => sec.items.map(item => ({ ...item, section_id: sec.id, score: null, comment: "", photos: [] }))));
+                  setSections(s.map(sec => ({ id: sec.id, title: sec.title || sec.name, observation: "", photos: [] })));
+                  setTemplateSource('Supabase (retry)');
+                } else {
+                  alert('Template não encontrado no Supabase: ' + (template.error || 'Erro desconhecido'));
+                }
+                setIsLoadingTemplate(false);
+              }}
+            >
+              Tentar Novamente (Supabase)
+            </button>
+            <button className="btn btn-secondary" onClick={onBack}>Cancelar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="page-header" style={{ flexWrap: "wrap", gap: "16px" }}>
         <div>
           <button className="btn btn-secondary btn-sm" onClick={onBack} style={{ marginBottom: 8 }}>← Voltar</button>
-          <div className="page-title">{safeInspection.location_name}</div>
+          <div className="page-title">{inspection.location_name}</div>
           <div className="page-sub">
-            Relatório de Inspeção · {safeInspection.date}
-            {currentTemplate.clientName && (
-              <span style={{ marginLeft: 12, fontSize: 11, color: '#6B7280' }}>
-                📋 {currentTemplate.clientName} ({totalItems} itens)
-              </span>
-            )}
+            Relatório de Inspeção · {inspection.date}
+            <span style={{ marginLeft: 12, fontSize: 11, color: templateSource === 'Supabase' ? '#0F6E56' : '#888' }}>
+              📋 {totalItems} itens (fonte: {templateSource})
+            </span>
           </div>
         </div>
         <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
@@ -233,7 +365,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
         </div>
       </div>
 
-      {/* Validation Modal - same as before */}
+      {/* Validation Modal */}
       {validationErrors && (
         <div className="modal-overlay" onClick={() => setValidationErrors(null)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
@@ -261,7 +393,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
         </div>
       )}
 
-      {/* AI Panel - same as before */}
+      {/* AI Panel */}
       {showAIPanel && (
         <div className="modal-overlay" onClick={() => setShowAIPanel(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
@@ -286,7 +418,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
 
       {/* Collapsible Categories */}
       <div style={{ marginBottom: 16 }}>
-        {templateSections.map(section => {
+        {sections.map(section => {
           const sItems = items.filter(i => i.section_id === section.id);
           const secData = sections.find(s => s.id === section.id) || { observation: "" };
           const health = getCategoryHealth(sItems);
@@ -323,7 +455,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                       placeholder="Mandatory: Enter overall observations for this category..." 
                       value={secData.observation} 
                       onChange={val => setSectionObservation(section.id, val)} 
-                      style={{ minHeight: 60, resize: "vertical", marginBottom: 12, borderColor: !secData.observation.trim() ? "#A32D2D" : undefined }}
+                      style={{ minHeight: 60, resize: "vertical", marginBottom: 12, borderColor: !secData.observation?.trim() ? "#A32D2D" : undefined }}
                     />
                     <label className="form-label" style={{ fontWeight: 600 }}>Category Photos (Min 3, Max 4) <span className="required">*</span></label>
                     <PhotoUploader 
@@ -337,17 +469,17 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                   </div>
 
                   {sItems.map(item => {
-                    const complete = isItemComplete(item, photoCount(item.id));
+                    const itemComplete = isItemComplete(item, photoCount(item.id));
                     const scored = item.score !== null;
                     const isLowScore = scored && item.score <= 3;
                     const needsNote = isLowScore && !item.comment?.trim();
                     const needsPhotos = isLowScore && photoCount(item.id) < 3;
                     
                     return (
-                      <div key={item.id} className={`checklist-item ${scored ? "scored" : ""} ${complete ? "complete" : needsNote || needsPhotos ? "needs-note" : ""}`}>
+                      <div key={item.id} className={`checklist-item ${scored ? "scored" : ""} ${itemComplete ? "complete" : needsNote || needsPhotos ? "needs-note" : ""}`}>
                         <div style={{ marginBottom: 8, fontSize: 13, display: "flex", alignItems: "flex-start", gap: 6 }}>
                           <span style={{ flex: 1 }}>{item.label || item.text}</span>
-                          {complete && <Icon name="check" size={14} style={{ color: "#0F6E56", flexShrink: 0, marginTop: 1 }} />}
+                          {itemComplete && <Icon name="check" size={14} style={{ color: "#0F6E56", flexShrink: 0, marginTop: 1 }} />}
                         </div>
                         
                         {item.qc_comment && (
@@ -408,12 +540,10 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
           <div style={{ flex: 1, minWidth: 250 }}>
             <SignaturePad label="Assinatura do Inspetor *" onSave={setInspectorSig} onClear={() => setInspectorSig("")} />
             {inspectorSig && <div style={{ fontSize: 11, color: "#0F6E56", marginBottom: 8 }}>✓ Assinatura do Inspetor capturada.</div>}
-            {inspectorSig && <img src={inspectorSig} alt="Assinatura Inspetor" style={{ width: 100, height: 30, objectFit: 'contain' }} />}
           </div>
           <div style={{ flex: 1, minWidth: 250 }}>
             <SignaturePad label="Assinatura do Cliente *" onSave={setClientSig} onClear={() => setClientSig("")} />
             {clientSig && <div style={{ fontSize: 11, color: "#0F6E56", marginBottom: 8 }}>✓ Assinatura do Cliente capturada.</div>}
-            {clientSig && <img src={clientSig} alt="Assinatura Cliente" style={{ width: 100, height: 30, objectFit: 'contain' }} />}
           </div>
         </div>
       </div>

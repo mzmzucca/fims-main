@@ -1,5 +1,6 @@
-// /src/utils/excelTemplateImporter.js
+// src/utils/excelTemplateImporter.js
 import * as XLSX from 'xlsx';
+import { templateService } from '../services/templateService';
 
 /**
  * Processa os dados do Excel e extrai os templates por cliente
@@ -23,12 +24,10 @@ export function processExcelTemplates(file) {
         const clientList = [];
         const totalSheets = workbook.SheetNames.length;
         
-        // Processar cada sheet (cliente) com limite de tempo
         let processed = 0;
         
         workbook.SheetNames.forEach((sheetName) => {
           try {
-            // Pular sheets vazias ou com nomes especiais
             if (!sheetName || sheetName.trim() === '' || sheetName.includes('metadata')) {
               return;
             }
@@ -39,7 +38,6 @@ export function processExcelTemplates(file) {
               return;
             }
             
-            // Converter para JSON com opções otimizadas
             const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
               header: 1,
               defval: '',
@@ -51,7 +49,6 @@ export function processExcelTemplates(file) {
               return;
             }
             
-            // Extrair dados do template
             const template = extractTemplateFromSheet(sheetName, jsonData);
             if (template && template.sections && template.sections.length > 0) {
               templates[template.clientId] = template;
@@ -73,7 +70,6 @@ export function processExcelTemplates(file) {
           }
         });
         
-        // Verificar se pelo menos um template foi processado
         if (Object.keys(templates).length === 0 && errors.length > 0) {
           reject(new Error(`Nenhum template foi processado. Erros: ${errors.join(', ')}`));
           return;
@@ -100,7 +96,6 @@ export function processExcelTemplates(file) {
 function extractTemplateFromSheet(sheetName, data) {
   if (!data || data.length < 3) return null;
   
-  // Nome do cliente (primeira linha com texto)
   let clientName = sheetName;
   for (let i = 0; i < Math.min(5, data.length); i++) {
     const row = data[i];
@@ -120,7 +115,6 @@ function extractTemplateFromSheet(sheetName, data) {
   let currentSection = null;
   let isProcessingItems = false;
   
-  // Encontrar onde começam os dados relevantes
   let startIndex = 0;
   for (let i = 0; i < Math.min(20, data.length); i++) {
     const row = data[i];
@@ -134,7 +128,6 @@ function extractTemplateFromSheet(sheetName, data) {
     }
   }
   
-  // Processar linhas
   for (let i = startIndex; i < data.length; i++) {
     const row = data[i];
     if (!row || row.length === 0) continue;
@@ -142,7 +135,6 @@ function extractTemplateFromSheet(sheetName, data) {
     const firstCell = String(row[0] || '').trim();
     const fullRow = row.filter(cell => String(cell).trim()).join(' ');
     
-    // Verificar se é o fim do template
     const upperFirst = firstCell.toUpperCase();
     if (upperFirst.includes('PONTUAÇÃO TOTAL') || 
         upperFirst.includes('TOTAL') ||
@@ -155,7 +147,6 @@ function extractTemplateFromSheet(sheetName, data) {
       break;
     }
     
-    // Se for um cabeçalho de seção
     if (isSectionHeader(firstCell, fullRow)) {
       if (currentSection && currentSection.items.length > 0) {
         sections.push(currentSection);
@@ -165,13 +156,13 @@ function extractTemplateFromSheet(sheetName, data) {
       currentSection = {
         id: `section_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
         title: title || 'Geral',
+        name: title || 'Geral',
         items: []
       };
       isProcessingItems = true;
       continue;
     }
     
-    // Se estamos processando itens
     if (isProcessingItems && currentSection) {
       const isValidItem = isValidInspectionItem(firstCell, fullRow);
       
@@ -179,13 +170,15 @@ function extractTemplateFromSheet(sheetName, data) {
         const label = cleanItemLabel(firstCell);
         
         if (label.length > 3) {
-          const exists = currentSection.items.some(item => item.label === label);
+          const exists = currentSection.items.some(item => item.label === label || item.text === label);
           if (!exists) {
             const weight = extractWeightFromRow(row);
             currentSection.items.push({
               id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
               label: label,
+              text: label,
               weight: weight || 1,
+              max: weight || 5,
               note: ''
             });
           }
@@ -220,7 +213,9 @@ function extractTemplateFromSheet(sheetName, data) {
           allItems.push({
             id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             label: label,
+            text: label,
             weight: 1,
+            max: 5,
             note: ''
           });
         }
@@ -230,6 +225,7 @@ function extractTemplateFromSheet(sheetName, data) {
       sections.push({
         id: `section_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
         title: 'Inspeção Geral',
+        name: 'Inspeção Geral',
         items: allItems
       });
     }
@@ -372,6 +368,7 @@ function extractWeightFromRow(row) {
 
 /**
  * Salva templates no localStorage
+ * EXPORTAÇÃO NECESSÁRIA PARA TemplateImporter.jsx
  */
 export function saveTemplatesToStorage(templates) {
   try {
@@ -411,53 +408,63 @@ export function loadTemplatesFromStorage() {
 }
 
 /**
- * Busca um template pelo nome do cliente (ALIAS para getClientTemplate)
+ * Busca um template pelo nome do cliente - VERSÃO ASSÍNCRONA COM SUPABASE
+ * Esta é a função principal que deve ser usada quando possível
+ */
+export async function getClientTemplateAsync(clientName) {
+  if (!clientName) return getDefaultTemplate();
+  
+  console.log(`[excelTemplateImporter] Buscando template async: ${clientName}`);
+  
+  // Usar o templateService que tem fallback completo
+  const template = await templateService.getTemplateWithFallback(clientName);
+  return template;
+}
+
+/**
+ * Versão síncrona para compatibilidade - usa cache local apenas
+ * DEPRECATED: Usar getClientTemplateAsync quando possível
+ */
+export function getClientTemplate(clientName) {
+  // Tentar localStorage primeiro
+  const localTemplate = templateService.getFromLocalStorage(clientName);
+  if (localTemplate && localTemplate.sections && localTemplate.sections.length > 0) {
+    return localTemplate;
+  }
+  
+  // Tentar template estático
+  try {
+    const { getTemplate } = require('./clientTemplates');
+    const staticTemplate = getTemplate(clientName);
+    if (staticTemplate && staticTemplate.sections && staticTemplate.sections.length > 0) {
+      return templateService.getStaticTemplate(clientName);
+    }
+  } catch (e) {}
+  
+  // Retornar padrão (mas disparar busca assíncrona em background)
+  if (clientName) {
+    templateService.fetchTemplateByClientName(clientName).then(result => {
+      if (result.success && result.template) {
+        templateService.cacheTemplate(result.template);
+        console.log(`[excelTemplateImporter] Template carregado em background: ${clientName}`);
+      }
+    }).catch(() => {});
+  }
+  
+  return getDefaultTemplate();
+}
+
+/**
+ * Busca um template pelo nome do cliente (ALIAS)
  */
 export function getTemplateByClientName(clientName) {
   return getClientTemplate(clientName);
 }
 
 /**
- * Busca um template pelo nome do cliente - FUNÇÃO PRINCIPAL
- * Esta é a função usada pelo App.jsx
- */
-export function getClientTemplate(clientName) {
-  try {
-    const templates = JSON.parse(localStorage.getItem('fims_templates') || '{}');
-    
-    if (!clientName) return getDefaultTemplate();
-    
-    const searchName = clientName.toLowerCase().trim();
-    
-    // Busca exata
-    for (const key of Object.keys(templates)) {
-      const template = templates[key];
-      if (template.clientName && template.clientName.toLowerCase() === searchName) {
-        return template;
-      }
-    }
-    
-    // Busca parcial
-    for (const key of Object.keys(templates)) {
-      const template = templates[key];
-      if (template.clientName && 
-          (template.clientName.toLowerCase().includes(searchName) || 
-           searchName.includes(template.clientName.toLowerCase()))) {
-        return template;
-      }
-    }
-    
-    return getDefaultTemplate();
-  } catch (error) {
-    console.error('Erro ao buscar template:', error);
-    return getDefaultTemplate();
-  }
-}
-
-/**
  * Retorna o template padrão
  */
-function getDefaultTemplate() {
+export function getDefaultTemplate() {
   return {
     clientId: 'DEFAULT',
     clientName: 'Template Padrão',
@@ -465,9 +472,10 @@ function getDefaultTemplate() {
       {
         id: 'default_section_1',
         title: 'Inspeção Geral',
+        name: 'Inspeção Geral',
         items: [
-          { id: 'gen_001', label: 'Estado geral das instalações', weight: 1, note: '' },
-          { id: 'gen_002', label: 'Segurança e limpeza', weight: 1, note: '' }
+          { id: 'gen_001', label: 'Estado geral das instalações', text: 'Estado geral das instalações', weight: 1, max: 5, note: '' },
+          { id: 'gen_002', label: 'Segurança e limpeza', text: 'Segurança e limpeza', weight: 1, max: 5, note: '' }
         ]
       }
     ],

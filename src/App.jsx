@@ -164,7 +164,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
 function AppContent() {
   const { notify } = useComms();
   
-    // --- ESTADO ---
+  // --- ESTADO ---
   const [currentUser, setCurrentUser] = useState(null);
   const [page, setPage] = useState("dashboard");
   const [inspections, setInspections] = useState([]);
@@ -193,18 +193,15 @@ function AppContent() {
           dataStore.get(STORAGE_KEYS.LOCATIONS),
           dataStore.get(STORAGE_KEYS.LOGS),
         ]);
-
         setInspections(savedInspections || genSeedInspections());
         setUsers(savedUsers || SEED_USERS);
         setLocations(savedLocations || SEED_LOCATIONS);
         setAuditLogs(savedLogs || []);
-
         // 2. Load light session data from localStorage
         const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
         const savedPage = localStorage.getItem(STORAGE_KEYS.CURRENT_PAGE);
         const savedEditing = localStorage.getItem(STORAGE_KEYS.EDITING_INSPECTION);
         const savedViewing = localStorage.getItem(STORAGE_KEYS.VIEWING_INSPECTION);
-
         if (savedUser) {
           try {
             const user = JSON.parse(savedUser);
@@ -216,13 +213,11 @@ function AppContent() {
             localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
           }
         }
-
         if (savedEditing) {
           try {
             setEditingInspection(JSON.parse(savedEditing));
           } catch (e) {}
         }
-
         if (savedViewing) {
           try {
             setViewingInspection(JSON.parse(savedViewing));
@@ -238,9 +233,68 @@ function AppContent() {
         setIsInitialized(true);
       }
     }
-
     loadData();
   }, []);
+
+  // ============================================
+  // SINCRONIZAÇÃO COM SUPABASE - INSPEÇÕES
+  // ============================================
+  useEffect(() => {
+    if (!isInitialized || !currentUser) return;
+    let unsubscribed = false;
+    let cleanupRealtime = null;
+
+    async function syncInspections() {
+      try {
+        const { dataService } = await import('./services/dataService');
+        
+        const result = await dataService.fetchInspections();
+        
+        if (unsubscribed || !result.success) return;
+        
+        console.log(`[App] Recebidas ${result.inspections.length} inspeções do Supabase`);
+        
+        // SIMPLIFICADO: Substituir dados locais pelos do Supabase
+        // O Supabase é a fonte de verdade
+        setInspections(result.inspections);
+        
+        // Salvar no IndexedDB
+        dataStore.set(STORAGE_KEYS.INSPECTIONS, result.inspections);
+        
+        // Subscrever Realtime
+        cleanupRealtime = dataService.subscribeToInspectionChanges((payload) => {
+          if (unsubscribed) return;
+          
+          console.log('[App] Realtime:', payload.eventType, payload.new?.location_name);
+          
+          if (payload.eventType === 'INSERT' && payload.new) {
+            setInspections(prev => {
+              if (prev.some(i => String(i.id) === String(payload.new.id))) return prev;
+              console.log('[App] Nova inspeção:', payload.new.location_name, '→', payload.new.inspector_name);
+              const updated = [payload.new, ...prev];
+              dataStore.set(STORAGE_KEYS.INSPECTIONS, updated);
+              return updated;
+            });
+          } else if (payload.eventType === 'UPDATE' && payload.new) {
+            setInspections(prev => {
+              const updated = prev.map(i => String(i.id) === String(payload.new.id) ? payload.new : i);
+              dataStore.set(STORAGE_KEYS.INSPECTIONS, updated);
+              return updated;
+            });
+          }
+        });
+      } catch (error) {
+        console.error('[App] Erro na sincronização:', error);
+      }
+    }
+
+    syncInspections();
+
+    return () => {
+      unsubscribed = true;
+      if (cleanupRealtime) cleanupRealtime();
+    };
+  }, [isInitialized, currentUser]);
 
   // --- SALVAR DADOS PESADOS NO INDEXEDDB ---
   useEffect(() => {
@@ -285,6 +339,7 @@ function AppContent() {
       localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
     }
   }, [viewingInspection]);
+
   // --- FUNÇÕES ---
   const alertCount = inspections.filter(i => i.alert_level === "critical" && i.score_pct !== null && !i.resolved).length;
   
@@ -543,9 +598,11 @@ function AppContent() {
 
   // --- RENDER ---
   if (!isInitialized) {
-    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-      <div className="spinner"></div>
-    </div>;
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <div className="spinner"></div>
+      </div>
+    );
   }
 
   // Se não tem usuário logado, mostra Login
@@ -574,7 +631,11 @@ function AppContent() {
           onMenuClick={() => setSidebarOpen(true)} 
           onLogout={handleLogout} 
           currentUser={currentUser} 
-          onNavigate={handleNavigate} 
+          onNavigate={handleNavigate}
+          inspections={inspections}
+          onStartInspection={handleStartInspection}
+          onAcceptTask={handleAcceptTask}
+          onDeclineTask={handleDeclineTask}
         />
         <div className="page scrollbar-thin">
           {editingInspection ? (
@@ -712,7 +773,7 @@ function AppContent() {
 export default function App() {
   return (
     <LangProvider>
-      <CommsProvider>
+      <CommsProvider currentUser={JSON.parse(localStorage.getItem('fims_current_user') || 'null')}>
         <AppContent />
       </CommsProvider>
     </LangProvider>

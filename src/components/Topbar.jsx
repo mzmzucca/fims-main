@@ -1,12 +1,13 @@
-// /src/components/Topbar.jsx
+// src/components/Topbar.jsx
 import { useState, useEffect } from "react";
 import { Icon } from "../lib/icons";
 import { useComms } from "../context/CommsContext";
 
-export default function Topbar({ title, onMenuClick, onLogout, currentUser, onNavigate }) {
-  const { notifications, markAllRead } = useComms();
+export default function Topbar({ title, onMenuClick, onLogout, currentUser, onNavigate, inspections, onStartInspection, onAcceptTask, onDeclineTask }) {
+  const { notifications, markAllRead, markNotificationRead } = useComms();
   const [showNotif, setShowNotif] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [actionNotif, setActionNotif] = useState(null); // Notificação para aceitar/recusar
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -19,13 +20,105 @@ export default function Topbar({ title, onMenuClick, onLogout, currentUser, onNa
     };
   }, []);
   
-  const myNotifs = notifications.filter(n => n.userId === currentUser.id && !n.read);
-  const allMyNotifs = notifications.filter(n => n.userId === currentUser.id).slice(0, 10);
+  const myNotifs = notifications.filter(n => String(n.userId) === String(currentUser.id) && !n.read);
+  const allMyNotifs = notifications.filter(n => String(n.userId) === String(currentUser.id)).slice(0, 15);
 
   const handleLogoutClick = () => {
     if (window.confirm('Tem certeza que deseja sair?')) {
       onLogout();
     }
+  };
+
+  // Verificar se é notificação de inspeção
+  const isInspectionNotif = (text) => {
+    if (!text) return false;
+    const keywords = ['tarefa', 'inspeção', 'agendada', 'atribuída', 'inspection', 'task', 'assigned'];
+    return keywords.some(kw => text.toLowerCase().includes(kw));
+  };
+
+  // Encontrar inspeção pendente associada à notificação
+  const findPendingInspection = (notif) => {
+    if (!inspections) return null;
+    
+    // Tentar encontrar por texto (nome do local)
+    const locationMatch = notif.text?.match(/(?:para|em|at)\s+(.+?)(?:\.|,|$)/i);
+    const locationName = locationMatch ? locationMatch[1].trim() : null;
+    
+    if (locationName) {
+      const insp = inspections.find(i => 
+        i.status === 'pending_acceptance' && 
+        String(i.inspector_id) === String(currentUser.id) &&
+        i.location_name?.toLowerCase().includes(locationName.toLowerCase())
+      );
+      if (insp) return insp;
+    }
+    
+    // Fallback: retornar qualquer inspeção pendente do inspector
+    return inspections.find(i => 
+      i.status === 'pending_acceptance' && 
+      String(i.inspector_id) === String(currentUser.id)
+    );
+  };
+
+  // Clicar na notificação
+  const handleNotifClick = (notif) => {
+    // Marcar como lida
+    markNotificationRead(notif.id);
+    
+    // Se é notificação de inspeção, mostrar diálogo
+    if (isInspectionNotif(notif.text)) {
+      const insp = findPendingInspection(notif);
+      if (insp) {
+        setActionNotif({ notif, inspection: insp });
+        setShowNotif(false);
+        return;
+      }
+    }
+    
+    // Para outras notificações, navegar para o link
+    if (notif.link) {
+      onNavigate(notif.link);
+    }
+    setShowNotif(false);
+  };
+
+  // Aceitar inspeção
+  const handleAccept = () => {
+    if (!actionNotif?.inspection) return;
+    
+    const insp = {
+      ...actionNotif.inspection,
+      accepted: true,
+      status: "pending"
+    };
+    
+    if (onAcceptTask) onAcceptTask(insp);
+    
+    // Iniciar a inspeção imediatamente
+    if (onStartInspection) {
+      setTimeout(() => onStartInspection(insp), 100);
+    }
+    
+    setActionNotif(null);
+  };
+
+  // Recusar inspeção
+  const handleDecline = () => {
+    if (!actionNotif?.inspection) return;
+    
+    const reason = prompt('Motivo da recusa:');
+    if (reason === null) return; // Usuário cancelou
+    
+    const insp = {
+      ...actionNotif.inspection,
+      accepted: false,
+      status: "rejected",
+      decline_reason: reason
+    };
+    
+    if (onDeclineTask) onDeclineTask(insp);
+    
+    setActionNotif(null);
   };
 
   return (
@@ -40,18 +133,54 @@ export default function Topbar({ title, onMenuClick, onLogout, currentUser, onNa
           <Icon name={isOnline ? "cloud" : "cloudOff"} size={14} /> {isOnline ? "Online" : "Offline"}
         </div>
         <div style={{ position: "relative" }}>
-          <button className="icon-btn notif-dot" onClick={() => { setShowNotif(!showNotif); if (!showNotif) markAllRead(currentUser.id); }}>
+          <button className="icon-btn notif-dot" onClick={() => setShowNotif(!showNotif)}>
             <Icon name="bell" size={15} />
+            {myNotifs.length > 0 && (
+              <span style={{ position: "absolute", top: -2, right: -2, background: "#A32D2D", color: "#fff", fontSize: 9, width: 16, height: 16, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}>
+                {myNotifs.length > 9 ? '9+' : myNotifs.length}
+              </span>
+            )}
           </button>
+          
           {showNotif && (
-            <div style={{ position: "absolute", top: 40, right: 0, width: 300, background: "#fff", border: "1px solid #ddd", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 1000, maxHeight: 400, overflowY: "auto" }}>
-              <div style={{ padding: "10px 12px", borderBottom: "1px solid #eee", fontWeight: 600, fontSize: 13 }}>Notificações</div>
+            <div style={{ position: "absolute", top: 40, right: 0, width: 320, background: "#fff", border: "1px solid #ddd", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 1000, maxHeight: 400, overflowY: "auto" }}>
+              <div style={{ padding: "10px 12px", borderBottom: "1px solid #eee", fontWeight: 600, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Notificações</span>
+                {myNotifs.length > 0 && (
+                  <button onClick={(e) => { e.stopPropagation(); markAllRead(currentUser.id); }} style={{ fontSize: 11, color: "#378ADD", background: "none", border: "none", cursor: "pointer" }}>
+                    Marcar todas como lidas
+                  </button>
+                )}
+              </div>
               {allMyNotifs.length === 0 && <div style={{ padding: 16, textAlign: "center", color: "#888", fontSize: 12 }}>Sem novidades.</div>}
               {allMyNotifs.map(n => (
-                <div key={n.id} style={{ padding: "10px 12px", borderBottom: "1px solid #eee", fontSize: 12, cursor: "pointer", background: n.read ? "transparent" : "#E6F1FB" }} 
-                  onClick={() => { if(n.link) onNavigate(n.link); setShowNotif(false); }}>
-                  {n.text}
-                  <div style={{ fontSize: 10, color: "#aaa", marginTop: 4 }}>{new Date(n.timestamp).toLocaleString("pt-PT")}</div>
+                <div key={n.id} 
+                  style={{ 
+                    padding: "10px 12px", 
+                    borderBottom: "1px solid #eee", 
+                    fontSize: 12, 
+                    cursor: "pointer", 
+                    background: n.read ? "transparent" : "#E6F1FB",
+                    transition: "background 0.2s"
+                  }} 
+                  onClick={() => handleNotifClick(n)}
+                  onMouseEnter={e => e.currentTarget.style.background = "#f0f0f0"}
+                  onMouseLeave={e => e.currentTarget.style.background = n.read ? "transparent" : "#E6F1FB"}
+                >
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    {isInspectionNotif(n.text) ? (
+                      <span style={{ fontSize: 14 }}>📋</span>
+                    ) : (
+                      <span style={{ fontSize: 14 }}>💬</span>
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ color: "#333" }}>{n.text}</div>
+                      <div style={{ fontSize: 10, color: "#aaa", marginTop: 4 }}>{new Date(n.timestamp || n.created_at).toLocaleString("pt-PT")}</div>
+                    </div>
+                    {isInspectionNotif(n.text) && !n.read && (
+                      <span style={{ fontSize: 10, color: "#0F6E56", whiteSpace: "nowrap" }}>Aceitar ›</span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -64,6 +193,48 @@ export default function Topbar({ title, onMenuClick, onLogout, currentUser, onNa
           {currentUser.avatar || currentUser.name?.substring(0, 2).toUpperCase() || 'US'}
         </div>
       </div>
+
+      {/* Modal de Aceitar/Recusar Inspeção */}
+      {actionNotif && (
+        <div className="modal-overlay" onClick={() => setActionNotif(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <div style={{ fontSize: 15, fontWeight: 500 }}>📋 Nova Inspeção Atribuída</div>
+              <button className="icon-btn" onClick={() => setActionNotif(null)}><Icon name="x" size={14} /></button>
+            </div>
+            <div className="modal-body">
+              <div style={{ background: "#F8F7F4", padding: 16, borderRadius: 8, marginBottom: 16 }}>
+                <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{actionNotif.inspection.location_name}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 13, color: "#555" }}>
+                  <div><span style={{ color: "#888" }}>Data:</span> {actionNotif.inspection.date}</div>
+                  <div><span style={{ color: "#888" }}>Hora:</span> {actionNotif.inspection.start_time || "A definir"}</div>
+                  <div><span style={{ color: "#888" }}>Tipo:</span> Inspeção</div>
+                  <div><span style={{ color: "#888" }}>Status:</span> <span style={{ color: "#EF9F27" }}>Por aceitar</span></div>
+                </div>
+              </div>
+              
+              <p style={{ fontSize: 13, color: "#555", marginBottom: 16 }}>
+                Deseja aceitar esta inspeção? Se aceitar, a inspeção será iniciada imediatamente.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn btn-secondary" 
+                onClick={handleDecline}
+                style={{ color: "#A32D2D", borderColor: "#A32D2D" }}
+              >
+                <Icon name="x" size={13} /> Recusar
+              </button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleAccept}
+              >
+                <Icon name="check" size={13} /> Aceitar e Iniciar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

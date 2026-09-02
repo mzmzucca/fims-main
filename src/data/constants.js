@@ -1,5 +1,5 @@
 // /src/data/constants.js
-import { getTemplateByClientName } from '../utils/excelTemplateImporter';
+import { templateService } from '../services/templateService';
 
 export const ROLES = { ADMIN: "admin", CEO: "ceo", SUPERVISOR: "supervisor", INSPECTOR: "inspector" };
 
@@ -28,7 +28,7 @@ export const PRIORITY_LEVELS = {
   low: { label: "Low", color: "#888888" }
 };
 
-// Lista de localizações - todas usando a função que busca do localStorage
+// Lista de localizações
 export const SEED_LOCATIONS = [
   { id: 1, name: "Baker Hughes", address: "Maputo, Moçambique", supervisor_id: 3 },
   { id: 2, name: "Bayport", address: "Maputo, Moçambique", supervisor_id: 3 },
@@ -83,47 +83,33 @@ export const SEED_LOCATIONS = [
   { id: 51, name: "Hollard Seguros R/C GA 4º Andar", address: "Maputo, Moçambique", supervisor_id: 3 }
 ];
 
-// Função para obter os templates - primeiro tenta do localStorage, depois fallback para estático
-export function getClientTemplate(clientName) {
-  // Primeiro tenta buscar do localStorage (templates importados do Excel)
-  const template = getTemplateByClientName(clientName);
-  
-  // Se encontrou no localStorage, retorna
-  if (template && template.sections && template.sections.length > 0) {
-    return template;
-  }
-  
-  // Fallback: tenta do clientTemplates.js estático
-  try {
-    const { getTemplate } = require('./clientTemplates');
-    const staticTemplate = getTemplate(clientName);
-    if (staticTemplate && staticTemplate.sections && staticTemplate.sections.length > 0) {
-      return staticTemplate;
-    }
-  } catch (e) {
-    console.warn('Fallback template not found:', e);
-  }
-  
-  // Template padrão de emergência
-  return {
-    clientId: 'DEFAULT',
-    clientName: clientName || 'Template Padrão',
-    sections: [
-      {
-        id: 'default_section',
-        title: 'Inspeção Geral',
-        items: [
-          { id: 'default_1', label: 'Estado geral das instalações', weight: 1 },
-          { id: 'default_2', label: 'Limpeza e organização', weight: 1 },
-          { id: 'default_3', label: 'Segurança', weight: 1 }
-        ]
-      }
-    ],
-    totalItems: 3
-  };
+/**
+ * Busca template pelo nome do cliente - VERSÃO ASSÍNCRONA
+ * PRIORIDADE: localStorage → Supabase → estático → padrão
+ */
+export async function getClientTemplateAsync(clientName) {
+  return await templateService.getTemplateWithFallback(clientName);
 }
 
-// Para compatibilidade com código existente que usa TEMPLATE_SECTIONS
-const defaultTemplate = getClientTemplate('Baker Hughes');
-export const TEMPLATE_SECTIONS = defaultTemplate.sections || [];
-export const TOTAL_POSSIBLE = TEMPLATE_SECTIONS.reduce((sum, s) => sum + (s.items ? s.items.reduce((ss, i) => ss + (i.weight || i.max || 1), 0) : 0), 0);
+/**
+ * Versão síncrona para compatibilidade
+ * Usa apenas cache local + estático
+ */
+export function getClientTemplate(clientName) {
+  return templateService.getFromLocalStorage(clientName) || templateService.getStaticTemplate(clientName);
+}
+
+// Template padrão (lazy)
+let _defaultTemplate = null;
+function getDefaultTemplate() {
+  if (!_defaultTemplate) {
+    _defaultTemplate = templateService.getDefaultTemplate();
+  }
+  return _defaultTemplate;
+}
+
+export const TEMPLATE_SECTIONS = getDefaultTemplate().sections || [];
+export const TOTAL_POSSIBLE = TEMPLATE_SECTIONS.reduce(
+  (sum, s) => sum + (s.items ? s.items.reduce((ss, i) => ss + (i.weight || i.max || 1), 0) : 0),
+  0
+);
