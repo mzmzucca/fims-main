@@ -27,7 +27,6 @@ import { CommsProvider, useComms } from "./context/CommsContext";
 import { getClientTemplate } from "./utils/excelTemplateImporter";
 import { authService } from "./services/authService";
 import { dataStore } from "./lib/dataStore";
-
 // Chaves para localStorage
 const STORAGE_KEYS = {
   CURRENT_USER: "fims_current_user",
@@ -40,12 +39,10 @@ const STORAGE_KEYS = {
   LOGS: "fims_logs",
   MESSAGES_DRAFT: "fims_messages_draft",
 };
-
 function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }) {
   const [locId, setLocId] = useState("");
   const [inspectorId, setInspectorId] = useState(currentUser.role === ROLES.INSPECTOR ? currentUser.id : "");
   const [selectedClient, setSelectedClient] = useState(null);
-
   const handleLocationChange = (e) => {
     const id = e.target.value;
     setLocId(id);
@@ -56,7 +53,6 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
       setSelectedClient(null);
     }
   };
-
   const handleCreate = () => {
     if (!locId) return;
     const loc = locations.find(l => l.id === Number(locId));
@@ -106,7 +102,6 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     };
     onCreate(insp);
   };
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
@@ -160,7 +155,6 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     </div>
   );
 }
-
 function AppContent() {
   const { notify } = useComms();
   
@@ -181,7 +175,6 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
   const [isInitialized, setIsInitialized] = useState(false);
-
   // --- CARREGAR DADOS DO INDEXEDDB + localStorage (uma vez) ---
   useEffect(() => {
     async function loadData() {
@@ -235,7 +228,6 @@ function AppContent() {
     }
     loadData();
   }, []);
-
   // ============================================
   // SINCRONIZAÇÃO COM SUPABASE - INSPEÇÕES
   // ============================================
@@ -243,7 +235,6 @@ function AppContent() {
     if (!isInitialized || !currentUser) return;
     let unsubscribed = false;
     let cleanupRealtime = null;
-
     async function syncInspections() {
       try {
         const { dataService } = await import('./services/dataService');
@@ -287,43 +278,35 @@ function AppContent() {
         console.error('[App] Erro na sincronização:', error);
       }
     }
-
     syncInspections();
-
     return () => {
       unsubscribed = true;
       if (cleanupRealtime) cleanupRealtime();
     };
   }, [isInitialized, currentUser]);
-
   // --- SALVAR DADOS PESADOS NO INDEXEDDB ---
   useEffect(() => {
     if (!isInitialized) return;
     dataStore.set(STORAGE_KEYS.INSPECTIONS, inspections);
   }, [inspections, isInitialized]);
-
   useEffect(() => {
     if (!isInitialized) return;
     dataStore.set(STORAGE_KEYS.USERS, users);
   }, [users, isInitialized]);
-
   useEffect(() => {
     if (!isInitialized) return;
     dataStore.set(STORAGE_KEYS.LOCATIONS, locations);
   }, [locations, isInitialized]);
-
   useEffect(() => {
     if (!isInitialized) return;
     dataStore.set(STORAGE_KEYS.LOGS, auditLogs);
   }, [auditLogs, isInitialized]);
-
   // --- SALVAR DADOS LEVES NO localStorage ---
   useEffect(() => {
     if (currentUser && page) {
       localStorage.setItem(STORAGE_KEYS.CURRENT_PAGE, page);
     }
   }, [page, currentUser]);
-
   useEffect(() => {
     if (editingInspection) {
       localStorage.setItem(STORAGE_KEYS.EDITING_INSPECTION, JSON.stringify(editingInspection));
@@ -331,7 +314,6 @@ function AppContent() {
       localStorage.removeItem(STORAGE_KEYS.EDITING_INSPECTION);
     }
   }, [editingInspection]);
-
   useEffect(() => {
     if (viewingInspection) {
       localStorage.setItem(STORAGE_KEYS.VIEWING_INSPECTION, JSON.stringify(viewingInspection));
@@ -339,7 +321,6 @@ function AppContent() {
       localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
     }
   }, [viewingInspection]);
-
   // --- FUNÇÕES ---
   const alertCount = inspections.filter(i => i.alert_level === "critical" && i.score_pct !== null && !i.resolved).length;
   
@@ -360,11 +341,9 @@ function AppContent() {
     messages: "Mensagens", 
     report_center: "Centro de Relatórios"
   };
-
   const addAuditLog = (user, action, type, detail) => {
     setAuditLogs(prev => [{ id: genId(), timestamp: new Date().toISOString(), user: user.name, action, type, detail }, ...prev]);
   };
-
   const handleLogin = (user) => {
     setCurrentUser(user);
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
@@ -378,7 +357,6 @@ function AppContent() {
     }
     addAuditLog(user, "Login", "login", "Entrou no sistema");
   };
-
   const handleLogout = async () => {
     if (currentUser) {
       await authService.logout(currentUser.id);
@@ -394,7 +372,6 @@ function AppContent() {
     setEditingInspection(null);
     setViewingInspection(null);
   };
-
   const handleNavigate = (p) => {
     setPage(p);
     setViewingInspection(null);
@@ -411,10 +388,16 @@ function AppContent() {
     setPage("inspections");
   };
   
-  const handleStartInspection = (insp) => {
+  // ================================================================
+  // FUNÇÃO handleStartInspection SUBSTITUÍDA
+  // ================================================================
+  const handleStartInspection = async (insp) => {
     let updated = { ...insp };
+    let needsSave = false;
+    
     if (insp.status === "pending" || insp.status === "needs_corrections") {
       updated.status = "in_progress";
+      needsSave = true;
     }
     
     if (!updated.items || updated.items.length === 0) {
@@ -440,6 +423,7 @@ function AppContent() {
       
       updated.template_id = template.clientId || "DEFAULT";
       updated.template_version = template.version || "1.0";
+      needsSave = true;
     }
     
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
@@ -447,18 +431,51 @@ function AppContent() {
     setViewingInspection(null);
     localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
     setPage("inspections");
+    // SALVAR NO SUPABASE (se mudou para in_progress ou se gerou items)
+    if (needsSave) {
+      try {
+        const { dataService } = await import('./services/dataService');
+        await dataService.saveInspection(updated);
+      } catch (error) {
+        console.error("Erro ao iniciar inspeção no Supabase:", error);
+      }
+    }
   };
   
-  const handleSaveInspection = (updated) => {
+  // ================================================================
+  // FUNÇÃO handleSaveInspection SUBSTITUÍDA
+  // ================================================================
+  const handleSaveInspection = async (updated) => {
+    // Atualiza UI
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     setEditingInspection(updated);
+    
+    // SALVAR NO SUPABASE
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(updated);
+      console.log("[App] Rascunho salvo no Supabase com sucesso.");
+    } catch (error) {
+      console.error("Erro ao salvar rascunho no Supabase:", error);
+    }
   };
   
-  const handleSubmitInspection = (updated) => {
+  // ================================================================
+  // FUNÇÃO handleSubmitInspection SUBSTITUÍDA
+  // ================================================================
+  const handleSubmitInspection = async (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     setEditingInspection(null);
     localStorage.removeItem(STORAGE_KEYS.EDITING_INSPECTION);
     setPage("inspections");
+    
+    // SALVAR NO SUPABASE
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(updated);
+    } catch (error) {
+      console.error("Erro ao submeter inspeção no Supabase:", error);
+    }
     addAuditLog(currentUser, "Notificação Enviada", "notification", `Email e WhatsApp enviados para o Supervisor (${updated.supervisor_name}) sobre a inspeção em ${updated.location_name}`);
     notify(3, `Nova inspeção submetida por ${currentUser.name} para ${updated.location_name}.`, "inspections");
     
@@ -470,6 +487,48 @@ function AppContent() {
       notify(3, `⚠️ CAPA ALERT: ${updated.location_name} has ${lowScoreItems.length} critical defect(s). Fix within 48 hours.`, "inspections");
       notify(2, `⚠️ CAPA ALERT: ${updated.location_name} has ${lowScoreItems.length} critical defect(s). Supervisor has been notified.`, "inspections");
     }
+  };
+  
+  // ================================================================
+  // FUNÇÃO handleAcceptTask SUBSTITUÍDA
+  // ================================================================
+  const handleAcceptTask = async (insp) => {
+    // Atualiza UI imediatamente
+    const updatedInsp = { ...insp, accepted: true, status: "pending" };
+    setInspections(prev => prev.map(i => i.id === insp.id ? updatedInsp : i));
+    addAuditLog(currentUser, "Tarefa Aceite", "schedule", `Aceitou a tarefa para ${insp.location_name}`);
+    notify(3, `${currentUser.name} aceitou a tarefa para ${insp.location_name}.`, "schedule");
+    
+    // SALVAR NO SUPABASE
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(updatedInsp);
+    } catch (error) {
+      console.error("Erro ao salvar aceitação no Supabase:", error);
+      alert("Erro ao sincronizar a aceitação. Verifique sua conexão.");
+    }
+  };
+  
+  const handleDeclineTask = (insp) => {
+    const reason = prompt("Motivo da recusa:", "");
+    if (reason === null) return;
+    setInspections(prev => prev.map(i => i.id === insp.id ? { ...i, accepted: false, status: "rejected", decline_reason: reason } : i));
+    addAuditLog(currentUser, "Tarefa Recusada", "schedule", `Recusou a tarefa para ${insp.location_name}. Motivo: ${reason}`);
+    notify(3, `⚠️ ${currentUser.name} RECUSOU a tarefa para ${insp.location_name}. Motivo: ${reason}`, "schedule");
+  };
+  const handleRequestLeave = (user) => {
+    const date = prompt("Data da folga (AAAA-MM-DD):", new Date().toISOString().split("T")[0]);
+    if (!date) return;
+    const leaveTask = { id: genId(), inspector_id: user.id, inspector_name: user.name, date, type: "leave", status: "leave" };
+    setInspections(prev => [leaveTask, ...prev]);
+    addAuditLog(user, "Folga Pedida", "schedule", `Pediu folga para ${date}`);
+    notify(3, `${user.name} pediu folga para ${date}.`, "schedule");
+    alert("Folga registada.");
+  };
+  // FUNÇÃO ADICIONADA PARA EXCLUIR INSPEÇÃO
+  const handleDelete = (id) => {
+    setInspections(prev => prev.filter(i => i.id !== id));
+    addAuditLog(currentUser, "Excluir", "inspection", `Excluiu a inspeção ID: ${id}`);
   };
   
   const handleCreateInspection = (insp) => {
@@ -485,7 +544,6 @@ function AppContent() {
     if (updated.status === "needs_corrections") notify(updated.inspector_id, `A inspeção de ${updated.location_name} foi rejeitada. Veja as correções necessárias.`, "inspections");
     if (updated.status === "reviewed") notify(2, `Uma inspeção foi aprovada por ${currentUser.name}. Pronta para envio ao cliente.`, "inspections");
   };
-
   const handleCreateSchedule = (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
       const template = getClientTemplate(task.location_name);
@@ -520,7 +578,6 @@ function AppContent() {
       if(t.inspector_id) notify(t.inspector_id, `Nova tarefa agendada para ${t.date} no local ${t.location_name}.`, "schedule");
     });
   };
-
   const handleBulkSchedule = (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
       const template = getClientTemplate(task.location_name);
@@ -555,7 +612,6 @@ function AppContent() {
       if(t.inspector_id) notify(t.inspector_id, `Nova tarefa agendada para ${t.date} no local ${t.location_name}.`, "schedule");
     });
   };
-
   const handleDragUpdate = (updated, notifyInspector = true) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     if (notifyInspector && updated.inspector_id) {
@@ -563,7 +619,6 @@ function AppContent() {
     }
     addAuditLog(currentUser, "Tarefa Movida (Drag/Drop)", "schedule", `Moveu ${updated.location_name} para ${updated.date} (${updated.inspector_name || "Unassigned"})`);
   };
-
   const handleConfirmReschedule = (updated, notifyClient, notifyInspector) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     addAuditLog(currentUser, "Inspeção Reagendada", "schedule", `Reagendou ${updated.location_name} para ${updated.date}. Motivo: ${updated.reschedule_reason}`);
@@ -571,31 +626,6 @@ function AppContent() {
     if (notifyClient) alert("Client notified (Simulated).");
     setReschedulingTask(null);
   };
-
-  const handleAcceptTask = (insp) => {
-    setInspections(prev => prev.map(i => i.id === insp.id ? { ...i, accepted: true, status: "pending" } : i));
-    addAuditLog(currentUser, "Tarefa Aceite", "schedule", `Aceitou a tarefa para ${insp.location_name}`);
-    notify(3, `${currentUser.name} aceitou a tarefa para ${insp.location_name}.`, "schedule");
-  };
-
-  const handleDeclineTask = (insp) => {
-    const reason = prompt("Motivo da recusa:", "");
-    if (reason === null) return;
-    setInspections(prev => prev.map(i => i.id === insp.id ? { ...i, accepted: false, status: "rejected", decline_reason: reason } : i));
-    addAuditLog(currentUser, "Tarefa Recusada", "schedule", `Recusou a tarefa para ${insp.location_name}. Motivo: ${reason}`);
-    notify(3, `⚠️ ${currentUser.name} RECUSOU a tarefa para ${insp.location_name}. Motivo: ${reason}`, "schedule");
-  };
-
-  const handleRequestLeave = (user) => {
-    const date = prompt("Data da folga (AAAA-MM-DD):", new Date().toISOString().split("T")[0]);
-    if (!date) return;
-    const leaveTask = { id: genId(), inspector_id: user.id, inspector_name: user.name, date, type: "leave", status: "leave" };
-    setInspections(prev => [leaveTask, ...prev]);
-    addAuditLog(user, "Folga Pedida", "schedule", `Pediu folga para ${date}`);
-    notify(3, `${user.name} pediu folga para ${date}.`, "schedule");
-    alert("Folga registada.");
-  };
-
   // --- RENDER ---
   if (!isInitialized) {
     return (
@@ -604,17 +634,14 @@ function AppContent() {
       </div>
     );
   }
-
   // Se não tem usuário logado, mostra Login
   if (!currentUser) {
     return <Login onLogin={handleLogin} />;
   }
-
   // Determinar o título da página
   let pageTitle = topBarTitles[page] || "FIMS";
   if (editingInspection) pageTitle = editingInspection.location_name;
   else if (viewingInspection) pageTitle = viewingInspection.location_name;
-
   return (
     <div className="fims-app">
       <Sidebar 
@@ -682,7 +709,8 @@ function AppContent() {
               inspections={inspections} 
               currentUser={currentUser} 
               onView={handleViewInspection} 
-              onCreate={() => setShowNewModal(true)} 
+              onCreate={() => setShowNewModal(true)}
+              onDelete={handleDelete} 
             />
           ) : page === "report_center" ? (
             <ReportCenter inspections={inspections} locations={locations} users={users} />
@@ -728,7 +756,10 @@ function AppContent() {
           ) : page === "audit" ? (
             <AuditPage auditLogs={auditLogs} />
           ) : page === "settings" ? (
-            <SettingsPage />
+            <SettingsPage 
+              inspections={inspections}
+              setInspections={setInspections}
+            /> 
           ) : null}
         </div>
       </div>
@@ -769,7 +800,6 @@ function AppContent() {
     </div>
   );
 }
-
 export default function App() {
   return (
     <LangProvider>

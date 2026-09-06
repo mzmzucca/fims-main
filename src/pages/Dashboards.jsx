@@ -1,4 +1,4 @@
-// /src/pages/Dashboards.jsx
+// src/pages/Dashboards.jsx
 import { jsPDF } from "jspdf";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import ScoreRing from "../components/ScoreRing";
@@ -48,55 +48,149 @@ function getCompanyAnalytics(inspections) {
 }
 
 // ============================================================
+// HOOK PERSONALIZADO PARA AVISOS DO SISTEMA
+// Remove avisos hardcoded, usa apenas anúncios reais
+// ============================================================
+function useSystemAlerts() {
+  const { announcements, dismissAnnouncement, confirmAnnouncement } = useComms();
+  const currentUser = JSON.parse(localStorage.getItem('fims_current_user') || 'null');
+  
+  const [dismissedIds, setDismissedIds] = useState(() => {
+    const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Filtrar apenas anúncios NÃO dispensados pelo utilizador atual
+  const visibleAlerts = (announcements || []).filter(announcement => {
+    if (!announcement || !announcement.id) return false;
+    
+    // Verificar se foi dispensado
+    const dismissedBy = announcement.dismissedBy || [];
+    const isDismissed = dismissedBy.includes(currentUser?.id) || dismissedIds.includes(announcement.id);
+    
+    return !isDismissed;
+  });
+
+  // Dismissar um aviso
+  const handleDismiss = (announcementId) => {
+    // Atualizar no CommsContext (que sincroniza com Supabase se disponível)
+    if (confirmAnnouncement) {
+      confirmAnnouncement(announcementId, currentUser?.id);
+    } else if (dismissAnnouncement) {
+      dismissAnnouncement(announcementId, currentUser?.id);
+    }
+    
+    // Também guardar localmente como backup
+    setDismissedIds(prev => {
+      const updated = [...prev, announcementId];
+      localStorage.setItem(DISMISSED_SYSTEM_ALERTS_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Resetar avisos (apenas para admin/CEO)
+  const resetAlerts = () => {
+    if (currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.CEO) {
+      setDismissedIds([]);
+      localStorage.removeItem(DISMISSED_SYSTEM_ALERTS_KEY);
+    }
+  };
+
+  return {
+    visibleAlerts,
+    handleDismiss,
+    resetAlerts,
+    canReset: currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.CEO
+  };
+}
+
+// ============================================================
+// COMPONENTE DE AVISO REUTILIZÁVEL
+// ============================================================
+function SystemAlertBanner({ alert, onDismiss }) {
+  if (!alert) return null;
+  
+  const fromUser = alert.fromId ? 
+    JSON.parse(localStorage.getItem('fims_users') || '[]').find(u => u.id === alert.fromId)?.name 
+    : null;
+
+  return (
+    <div 
+      style={{ 
+        backgroundColor: "#FEF3C7",
+        borderLeft: "3px solid #F59E0B",
+        borderRadius: 8,
+        padding: "12px 16px",
+        marginBottom: 8,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1 }}>
+        <span style={{ fontSize: 18, flexShrink: 0 }}>📢</span>
+        <div>
+          {alert.title && (
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#92400E", marginBottom: 2 }}>
+              {alert.title}
+            </div>
+          )}
+          <span style={{ fontSize: 13, color: "#78350F" }}>
+            {alert.text || alert.title}
+          </span>
+          {fromUser && (
+            <span style={{ fontSize: 11, color: "#A16207", marginLeft: 8 }}>
+              — {fromUser}
+            </span>
+          )}
+          {alert.timestamp && (
+            <span style={{ fontSize: 10, color: "#A16207", marginLeft: 8 }}>
+              {new Date(alert.timestamp).toLocaleString("pt-PT", { 
+                day: '2-digit', 
+                month: '2-digit', 
+                hour: '2-digit', 
+                minute: '2-digit' 
+              })}
+            </span>
+          )}
+        </div>
+      </div>
+      <button 
+        onClick={() => onDismiss(alert.id)}
+        style={{
+          backgroundColor: "#F59E0B",
+          color: "white",
+          border: "none",
+          borderRadius: 6,
+          padding: "6px 16px",
+          fontSize: 12,
+          fontWeight: 500,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+          transition: "background-color 0.2s"
+        }}
+        onMouseEnter={e => e.target.style.backgroundColor = "#D97706"}
+        onMouseLeave={e => e.target.style.backgroundColor = "#F59E0B"}
+      >
+        OK Recebido
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
 // CEO DASHBOARD
 // ============================================================
 export function CEODashboard({ inspections, locations, auditLogs, currentUser }) {
   const { announcements, createAnnouncement } = useComms();
   const [showAnnModal, setShowAnnModal] = useState(false);
+  const [annTitle, setAnnTitle] = useState("");
   const [annText, setAnnText] = useState("");
+  const [annTarget, setAnnTarget] = useState("all");
   
-  const [dismissedAlerts, setDismissedAlerts] = useState(() => {
-    const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [systemAlerts, setSystemAlerts] = useState(() => {
-    const fixedAlerts = [
-      "O sistema está em revisão",
-      "O sistema está sobre revisão!"
-    ];
-    
-    const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
-    const announcementAlerts = safeAnnouncements
-      .map(a => a.text)
-      .filter(text => text && typeof text === 'string' && text.trim().length > 0);
-    
-    const allAlerts = [...fixedAlerts, ...announcementAlerts];
-    return [...new Set(allAlerts.filter(alert => alert && typeof alert === 'string' && alert.trim().length > 0))];
-  });
-
-  const visibleAlerts = systemAlerts.filter((alert, index) => {
-    if (!alert || typeof alert !== 'string' || alert.trim().length === 0) {
-      return false;
-    }
-    const alertId = `alert_${index}_${alert.substring(0, 30)}`;
-    return !dismissedAlerts.includes(alertId);
-  });
-
-  const dismissSystemAlert = (alertText, index) => {
-    if (!alertText || typeof alertText !== 'string') return;
-    const alertId = `alert_${index}_${alertText.substring(0, 30)}`;
-    const newDismissed = [...dismissedAlerts, alertId];
-    setDismissedAlerts(newDismissed);
-    localStorage.setItem(DISMISSED_SYSTEM_ALERTS_KEY, JSON.stringify(newDismissed));
-  };
-
-  const resetSystemAlerts = () => {
-    if (currentUser.role === ROLES.ADMIN || currentUser.role === ROLES.CEO) {
-      setDismissedAlerts([]);
-      localStorage.removeItem(DISMISSED_SYSTEM_ALERTS_KEY);
-    }
-  };
+  // Usar o hook personalizado (sem avisos hardcoded)
+  const { visibleAlerts, handleDismiss, resetAlerts, canReset } = useSystemAlerts();
 
   const submitted = inspections.filter(i => ["submitted", "reviewed", "closed"].includes(i.status));
   const avgScore = submitted.length ? Math.round(submitted.reduce((s, i) => s + (i.score_pct || 0), 0) / submitted.length) : 0;
@@ -138,6 +232,18 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
     doc.save("FIMS-Executive-Summary.pdf");
   };
 
+  const handleCreateAnnouncement = () => {
+    if (!annTitle.trim() || !annText.trim()) return;
+    
+    const targetRole = annTarget === "all" ? null : annTarget;
+    createAnnouncement(currentUser.id, annTitle.trim(), annText.trim(), targetRole);
+    
+    setAnnTitle("");
+    setAnnText("");
+    setAnnTarget("all");
+    setShowAnnModal(false);
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -148,56 +254,23 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
         </div>
       </div>
 
+      {/* Avisos do Sistema - APENAS ANÚNCIOS REAIS */}
       {visibleAlerts.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          {visibleAlerts.map((alert, index) => (
-            <div 
-              key={`alert_${index}`}
-              className="alert-bar alert-info" 
-              style={{ 
-                justifyContent: "space-between",
-                backgroundColor: "#FEF3C7",
-                borderLeft: "3px solid #F59E0B",
-                borderRadius: 8,
-                padding: "12px 16px",
-                marginBottom: 8,
-                display: "flex",
-                alignItems: "center",
-                gap: 12
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 18 }}>⚠️</span>
-                <span style={{ fontSize: 13, color: "#92400E" }}>
-                  <strong>Aviso do Sistema:</strong> {alert}
-                </span>
-              </div>
-              <button 
-                className="btn btn-secondary btn-sm" 
-                onClick={() => dismissSystemAlert(alert, index)}
-                style={{
-                  backgroundColor: "#F59E0B",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  padding: "4px 14px",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap"
-                }}
-              >
-                OK Recebido
-              </button>
-            </div>
+          {visibleAlerts.map(alert => (
+            <SystemAlertBanner 
+              key={alert.id} 
+              alert={alert} 
+              onDismiss={handleDismiss} 
+            />
           ))}
         </div>
       )}
 
-      {(currentUser.role === ROLES.ADMIN || currentUser.role === ROLES.CEO) && (
+      {canReset && visibleAlerts.length === 0 && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
           <button
-            onClick={resetSystemAlerts}
+            onClick={resetAlerts}
             style={{
               background: 'transparent',
               border: 'none',
@@ -207,7 +280,7 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
               textDecoration: 'underline'
             }}
           >
-            Resetar avisos
+            Mostrar avisos anteriores
           </button>
         </div>
       )}
@@ -239,11 +312,21 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
           <h3 style={{ fontSize: 15, marginBottom: 12 }}>Top & Bottom Performers</h3>
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12, color: "#3B6D11", fontWeight: 600, marginBottom: 8 }}>🏆 Top 3 Clients</div>
-            {performers.top.map((p, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", borderBottom: "1px solid #eee" }}><span>{p.name}</span><span style={{ fontWeight: 600, color: "#3B6D11" }}>{p.avg}%</span></div>))}
+            {performers.top.map((p, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", borderBottom: "1px solid #eee" }}>
+                <span>{p.name}</span>
+                <span style={{ fontWeight: 600, color: "#3B6D11" }}>{p.avg}%</span>
+              </div>
+            ))}
           </div>
           <div>
             <div style={{ fontSize: 12, color: "#A32D2D", fontWeight: 600, marginBottom: 8 }}>⚠️ Bottom 3 Clients</div>
-            {performers.bottom.map((p, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", borderBottom: "1px solid #eee" }}><span>{p.name}</span><span style={{ fontWeight: 600, color: "#A32D2D" }}>{p.avg}%</span></div>))}
+            {performers.bottom.map((p, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", borderBottom: "1px solid #eee" }}>
+                <span>{p.name}</span>
+                <span style={{ fontWeight: 600, color: "#A32D2D" }}>{p.avg}%</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -279,7 +362,10 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
           {riskClients.length === 0 && <div style={{ fontSize: 13, color: "#888" }}>All clients are within SLA targets.</div>}
           {riskClients.map(c => (
             <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #eee" }}>
-              <div><div style={{ fontWeight: 500, fontSize: 14 }}>{c.name}</div><div style={{ fontSize: 11, color: "#888" }}>Last Score: {c.lastScore}%</div></div>
+              <div>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{c.name}</div>
+                <div style={{ fontSize: 11, color: "#888" }}>Last Score: {c.lastScore}%</div>
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {c.churnRisk && <span className="badge badge-critical">Churn Risk</span>}
                 {c.belowSla && <span className="badge badge-warning">Below SLA</span>}
@@ -293,32 +379,63 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
           {highLevelLogs.map(log => (
             <div key={log.id} style={{ display: "flex", gap: 10, padding: "8px 0", borderBottom: "1px solid #eee" }}>
               <StatusBadge status={log.type === "review" ? "reviewed" : log.type === "capa_alert" ? "critical" : log.type === "notification" ? "submitted" : "progress"} />
-              <div><div style={{ fontSize: 13, fontWeight: 500 }}>{log.user} - {log.action}</div><div style={{ fontSize: 11, color: "#888" }}>{log.detail}</div></div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500 }}>{log.user} - {log.action}</div>
+                <div style={{ fontSize: 11, color: "#888" }}>{log.detail}</div>
+              </div>
             </div>
           ))}
         </div>
       </div>
 
+      {/* Modal de Criar Anúncio - MELHORADO */}
       {showAnnModal && (
         <div className="modal-overlay" onClick={() => setShowAnnModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
-            <div className="modal-header"><div style={{ fontSize: 15, fontWeight: 500 }}>Criar Aviso Geral</div><button className="icon-btn" onClick={() => setShowAnnModal(false)}><Icon name="x" size={14} /></button></div>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 450 }}>
+            <div className="modal-header">
+              <div style={{ fontSize: 15, fontWeight: 500 }}>📢 Criar Aviso Geral</div>
+              <button className="icon-btn" onClick={() => setShowAnnModal(false)}><Icon name="x" size={14} /></button>
+            </div>
             <div className="modal-body">
-              <textarea className="form-textarea" placeholder="Escreva o aviso para toda a equipa..." value={annText} onChange={e => setAnnText(e.target.value)}></textarea>
+              <div className="form-group">
+                <label className="form-label">Título *</label>
+                <input 
+                  className="form-input" 
+                  placeholder="Ex: Manutenção programada" 
+                  value={annTitle} 
+                  onChange={e => setAnnTitle(e.target.value)}
+                  maxLength={100}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Mensagem *</label>
+                <textarea 
+                  className="form-textarea" 
+                  placeholder="Escreva o aviso para toda a equipa..."
+                  value={annText}
+                  onChange={e => setAnnText(e.target.value)}
+                  rows={4}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Destinatários</label>
+                <select className="form-select" value={annTarget} onChange={e => setAnnTarget(e.target.value)}>
+                  <option value="all">Todos os utilizadores</option>
+                  <option value="inspector">Apenas Inspectores</option>
+                  <option value="supervisor">Apenas Supervisores</option>
+                  <option value="admin">Apenas Admins</option>
+                </select>
+              </div>
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setShowAnnModal(false)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={() => { 
-                if (annText && annText.trim()) {
-                  createAnnouncement(annText, currentUser.name); 
-                  setSystemAlerts(prev => {
-                    const newAlerts = [...prev, annText.trim()];
-                    return [...new Set(newAlerts.filter(a => a && typeof a === 'string' && a.trim().length > 0))];
-                  });
-                }
-                setShowAnnModal(false); 
-                setAnnText(""); 
-              }}>Publicar</button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleCreateAnnouncement}
+                disabled={!annTitle.trim() || !annText.trim()}
+              >
+                <Icon name="send" size={13} /> Publicar
+              </button>
             </div>
           </div>
         </div>
@@ -331,40 +448,9 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
 // SUPERVISOR DASHBOARD
 // ============================================================
 export function SupervisorDashboard({ inspections, users, currentUser, onView }) {
-  const { announcements } = useComms();
-  
-  const [dismissedAlerts, setDismissedAlerts] = useState(() => {
-    const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
-    return saved ? JSON.parse(saved) : [];
-  });
+  // Usar o hook personalizado (sem avisos hardcoded)
+  const { visibleAlerts, handleDismiss } = useSystemAlerts();
 
-  const [systemAlerts, setSystemAlerts] = useState(() => {
-    const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
-    const fixedAlerts = ["O sistema está em revisão", "O sistema está sobre revisão!"];
-    const announcementAlerts = safeAnnouncements
-      .map(a => a.text)
-      .filter(text => text && typeof text === 'string' && text.trim().length > 0);
-    const allAlerts = [...fixedAlerts, ...announcementAlerts];
-    return [...new Set(allAlerts.filter(alert => alert && typeof alert === 'string' && alert.trim().length > 0))];
-  });
-
-  const visibleAlerts = systemAlerts.filter((alert, index) => {
-    if (!alert || typeof alert !== 'string' || alert.trim().length === 0) {
-      return false;
-    }
-    const alertId = `alert_${index}_${alert.substring(0, 30)}`;
-    return !dismissedAlerts.includes(alertId);
-  });
-
-  const dismissSystemAlert = (alertText, index) => {
-    if (!alertText || typeof alertText !== 'string') return;
-    const alertId = `alert_${index}_${alertText.substring(0, 30)}`;
-    const newDismissed = [...dismissedAlerts, alertId];
-    setDismissedAlerts(newDismissed);
-    localStorage.setItem(DISMISSED_SYSTEM_ALERTS_KEY, JSON.stringify(newDismissed));
-  };
-
-  // Supervisor sees all inspections (not filtered by inspector)
   const myInsp = inspections.filter(i => i.type !== "leave");
   
   const teamCount = users.filter(u => u.role === ROLES.INSPECTOR).length;
@@ -382,49 +468,25 @@ export function SupervisorDashboard({ inspections, users, currentUser, onView })
 
   return (
     <div>
-      <div className="page-header"><div><div className="page-title">Welcome, {currentUser.name}</div><div className="page-sub">Supervisor Dashboard</div></div></div>
-      
-      {visibleAlerts.map((alert, index) => (
-        <div 
-          key={`alert_${index}`}
-          className="alert-bar alert-info" 
-          style={{ 
-            justifyContent: "space-between",
-            backgroundColor: "#FEF3C7",
-            borderLeft: "3px solid #F59E0B",
-            borderRadius: 8,
-            padding: "12px 16px",
-            marginBottom: 8,
-            display: "flex",
-            alignItems: "center",
-            gap: 12
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>⚠️</span>
-            <span style={{ fontSize: 13, color: "#92400E" }}>
-              <strong>Aviso:</strong> {alert}
-            </span>
-          </div>
-          <button 
-            className="btn btn-secondary btn-sm" 
-            onClick={() => dismissSystemAlert(alert, index)}
-            style={{
-              backgroundColor: "#F59E0B",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              padding: "4px 14px",
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: "pointer",
-              whiteSpace: "nowrap"
-            }}
-          >
-            OK Recebido
-          </button>
+      <div className="page-header">
+        <div>
+          <div className="page-title">Welcome, {currentUser.name}</div>
+          <div className="page-sub">Supervisor Dashboard</div>
         </div>
-      ))}
+      </div>
+      
+      {/* Avisos do Sistema - APENAS ANÚNCIOS REAIS */}
+      {visibleAlerts.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          {visibleAlerts.map(alert => (
+            <SystemAlertBanner 
+              key={alert.id} 
+              alert={alert} 
+              onDismiss={handleDismiss} 
+            />
+          ))}
+        </div>
+      )}
 
       <div className="metric-grid">
         <div className="metric-card"><div className="metric-label">My Team</div><div className="metric-value" style={{ color: "#1E2A3A" }}>{teamCount}</div></div>
@@ -498,47 +560,16 @@ export function SupervisorDashboard({ inspections, users, currentUser, onView })
 // ============================================================
 export function InspectorDashboard({ inspections, users, currentUser, onStartInspection, onAcceptTask, onDeclineTask, onRequestLeave }) {
   const { t } = useLang();
-  const { announcements } = useComms();
   
-  const [dismissedAlerts, setDismissedAlerts] = useState(() => {
-    const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [systemAlerts, setSystemAlerts] = useState(() => {
-    const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
-    const fixedAlerts = ["O sistema está em revisão", "O sistema está sobre revisão!"];
-    const announcementAlerts = safeAnnouncements
-      .map(a => a.text)
-      .filter(text => text && typeof text === 'string' && text.trim().length > 0);
-    const allAlerts = [...fixedAlerts, ...announcementAlerts];
-    return [...new Set(allAlerts.filter(alert => alert && typeof alert === 'string' && alert.trim().length > 0))];
-  });
-
-  const visibleAlerts = systemAlerts.filter((alert, index) => {
-    if (!alert || typeof alert !== 'string' || alert.trim().length === 0) {
-      return false;
-    }
-    const alertId = `alert_${index}_${alert.substring(0, 30)}`;
-    return !dismissedAlerts.includes(alertId);
-  });
-
-  const dismissSystemAlert = (alertText, index) => {
-    if (!alertText || typeof alertText !== 'string') return;
-    const alertId = `alert_${index}_${alertText.substring(0, 30)}`;
-    const newDismissed = [...dismissedAlerts, alertId];
-    setDismissedAlerts(newDismissed);
-    localStorage.setItem(DISMISSED_SYSTEM_ALERTS_KEY, JSON.stringify(newDismissed));
-  };
+  // Usar o hook personalizado (sem avisos hardcoded)
+  const { visibleAlerts, handleDismiss } = useSystemAlerts();
 
   // ===== FIXED FILTER (handles ID type mismatch + name fallback) =====
   const myInsp = inspections.filter(i => {
     if (i.type === "leave") return false;
 
-    // Match by ID (number or string)
     if (String(i.inspector_id) === String(currentUser.id)) return true;
 
-    // Fallback: match by name (while IDs are inconsistent between seed and Supabase)
     if (
       i.inspector_name &&
       currentUser.name &&
@@ -580,47 +611,18 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
         </div>
       </div>
 
-      {visibleAlerts.map((alert, index) => (
-        <div 
-          key={`alert_${index}`}
-          className="alert-bar alert-info" 
-          style={{ 
-            justifyContent: "space-between",
-            backgroundColor: "#FEF3C7",
-            borderLeft: "3px solid #F59E0B",
-            borderRadius: 8,
-            padding: "12px 16px",
-            marginBottom: 8,
-            display: "flex",
-            alignItems: "center",
-            gap: 12
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>⚠️</span>
-            <span style={{ fontSize: 13, color: "#92400E" }}>
-              <strong>Aviso:</strong> {alert}
-            </span>
-          </div>
-          <button 
-            className="btn btn-secondary btn-sm" 
-            onClick={() => dismissSystemAlert(alert, index)}
-            style={{
-              backgroundColor: "#F59E0B",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              padding: "4px 14px",
-              fontSize: 12,
-              fontWeight: 500,
-              cursor: "pointer",
-              whiteSpace: "nowrap"
-            }}
-          >
-            OK Recebido
-          </button>
+      {/* Avisos do Sistema - APENAS ANÚNCIOS REAIS */}
+      {visibleAlerts.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          {visibleAlerts.map(alert => (
+            <SystemAlertBanner 
+              key={alert.id} 
+              alert={alert} 
+              onDismiss={handleDismiss} 
+            />
+          ))}
         </div>
-      ))}
+      )}
 
       <div className="metric-grid" style={{ marginBottom: 24 }}>
         <div className="metric-card"><div className="metric-label">Pending Acceptance</div><div className="metric-value" style={{ color: "#EF9F27" }}>{pendingAcceptance.length}</div></div>

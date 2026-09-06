@@ -1,5 +1,6 @@
 // /src/pages/Management.jsx
 import { authService } from "../services/authService";
+import { dataService } from "../services/dataService";
 import { dataStore } from "../lib/dataStore";
 import { useState, useRef, useEffect } from "react";
 import { Icon } from "../lib/icons";
@@ -10,15 +11,15 @@ import { TemplateImporter } from "./Management/TemplateImporter";
 import { loadTemplatesFromStorage, getTemplateByClientName } from "../utils/excelTemplateImporter";
 import { SupabaseSync } from "./Management/SupabaseSync";
 
-// /src/pages/Management.jsx - Atualizar UsersPage
-
+// ============================================================
+// USERS PAGE
+// ============================================================
 export function UsersPage({ users, setUsers }) {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", password: "", role: ROLES.INSPECTOR });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Carregar usuários do Supabase ao montar
   useEffect(() => {
     loadUsersFromSupabase();
   }, []);
@@ -48,7 +49,6 @@ export function UsersPage({ users, setUsers }) {
       const result = await authService.createUser(form);
       
       if (result.success) {
-        // Recarregar lista de usuários
         const { users: updatedUsers } = await authService.fetchAllUsers();
         setUsers(updatedUsers);
         localStorage.setItem('fims_users', JSON.stringify(updatedUsers));
@@ -106,7 +106,7 @@ export function UsersPage({ users, setUsers }) {
       </div>
       
       {error && (
-        <div className="error-banner" style={{ 
+        <div style={{ 
           background: '#FEF2F2', 
           padding: '10px 16px', 
           borderRadius: '8px',
@@ -230,6 +230,9 @@ export function UsersPage({ users, setUsers }) {
   );
 }
 
+// ============================================================
+// LOCATIONS PAGE
+// ============================================================
 export function LocationsPage({ locations, setLocations, users, inspections }) {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: "", address: "", supervisor_id: "" });
@@ -271,6 +274,9 @@ export function LocationsPage({ locations, setLocations, users, inspections }) {
   );
 }
 
+// ============================================================
+// REPORTS PAGE
+// ============================================================
 export function ReportsPage({ inspections, locations }) {
   const [filterLoc, setFilterLoc] = useState("all");
   let filtered = inspections.filter(i => i.score_pct !== null);
@@ -306,7 +312,7 @@ export function ReportsPage({ inspections, locations }) {
 }
 
 // ============================================================
-// TEMPLATES PAGE - COMPLETO COM IMPORTAÇÃO DO EXCEL E SUPABASE
+// TEMPLATES PAGE
 // ============================================================
 export function TemplatesPage() {
   const [showImporter, setShowImporter] = useState(false);
@@ -323,32 +329,24 @@ export function TemplatesPage() {
   const loadTemplates = () => {
     const { clients } = loadTemplatesFromStorage();
     setTemplates(clients);
-    
-    // Calcular estatísticas
     const { templates: allTemplates } = loadTemplatesFromStorage();
     const totalItems = Object.values(allTemplates).reduce((sum, t) => sum + (t.totalItems || 0), 0);
     const totalSections = Object.values(allTemplates).reduce((sum, t) => sum + (t.sections || []).length, 0);
-    setStats({
-      total: clients.length,
-      totalItems: totalItems,
-      totalSections: totalSections
-    });
+    setStats({ total: clients.length, totalItems, totalSections });
   };
 
   const handleImportComplete = (count) => {
     loadTemplates();
     setShowImporter(false);
-    if (count > 0) {
-      alert(`✅ ${count} templates importados com sucesso!`);
-    }
+    if (count > 0) alert(`✅ ${count} templates importados com sucesso!`);
   };
 
   const handleSyncComplete = (result) => {
     console.log('Sincronização concluída:', result);
     loadTemplates();
-    if (result && result.results && result.results.success) {
+    if (result?.results?.success) {
       alert(`✅ Sincronização concluída! ${result.results.success.length} templates enviados.`);
-    } else if (result && result.total) {
+    } else if (result?.total) {
       alert(`✅ ${result.total} templates sincronizados do Supabase.`);
     }
   };
@@ -356,23 +354,14 @@ export function TemplatesPage() {
   const handleViewTemplate = (clientId) => {
     const { templates: allTemplates } = loadTemplatesFromStorage();
     const template = allTemplates[clientId];
-    if (template) {
-      setSelectedTemplate(template);
-    }
-  };
-
-  const handleCloseTemplate = () => {
-    setSelectedTemplate(null);
+    if (template) setSelectedTemplate(template);
   };
 
   const handleDeleteTemplate = (clientId) => {
     if (!window.confirm('Tem certeza que deseja remover este template?')) return;
-    
     const { templates: allTemplates } = loadTemplatesFromStorage();
     delete allTemplates[clientId];
     localStorage.setItem('fims_templates', JSON.stringify(allTemplates));
-    
-    // Atualizar lista de clientes
     const clients = Object.keys(allTemplates).map(key => ({
       id: allTemplates[key].clientId,
       name: allTemplates[key].clientName,
@@ -381,114 +370,56 @@ export function TemplatesPage() {
       lastUpdated: allTemplates[key].lastUpdated
     }));
     localStorage.setItem('fims_template_clients', JSON.stringify(clients));
-    
     loadTemplates();
   };
 
-  const filteredTemplates = templates.filter(t => 
-    t.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredTemplates = templates.filter(t => t.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
     <div className="templates-page">
       <div className="page-header">
         <div>
           <div className="page-title">📋 Templates de Inspeção</div>
-          <div className="page-sub">
-            {stats.total} clientes • {stats.totalSections} secções • {stats.totalItems} itens
-          </div>
+          <div className="page-sub">{stats.total} clientes • {stats.totalSections} secções • {stats.totalItems} itens</div>
         </div>
         <div className="header-actions">
-          <input
-            type="text"
-            placeholder="Buscar cliente..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="search-input"
-          />
-          <button 
-            className="btn btn-secondary btn-sm"
-            onClick={() => setShowSync(!showSync)}
-          >
-            <Icon name="cloud" size={13} />
-            {showSync ? 'Fechar Sincronização' : '☁️ Sincronizar'}
+          <input type="text" placeholder="Buscar cliente..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="search-input" />
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowSync(!showSync)}>
+            <Icon name="cloud" size={13} />{showSync ? 'Fechar Sincronização' : '☁️ Sincronizar'}
           </button>
-          <button 
-            className="btn btn-primary btn-sm"
-            onClick={() => setShowImporter(!showImporter)}
-          >
-            <Icon name="upload" size={13} />
-            {showImporter ? 'Fechar' : 'Importar Excel'}
+          <button className="btn btn-primary btn-sm" onClick={() => setShowImporter(!showImporter)}>
+            <Icon name="upload" size={13} />{showImporter ? 'Fechar' : 'Importar Excel'}
           </button>
         </div>
       </div>
 
-      {showImporter && (
-        <TemplateImporter onImportComplete={handleImportComplete} />
-      )}
+      {showImporter && <TemplateImporter onImportComplete={handleImportComplete} />}
+      {showSync && <SupabaseSync onSyncComplete={handleSyncComplete} />}
 
-      {showSync && (
-        <SupabaseSync onSyncComplete={handleSyncComplete} />
-      )}
-
-      {/* Modal de detalhes do template */}
       {selectedTemplate && (
-        <div className="modal-overlay" onClick={handleCloseTemplate}>
+        <div className="modal-overlay" onClick={() => setSelectedTemplate(null)}>
           <div className="modal template-detail-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div style={{ fontSize: 16, fontWeight: 600 }}>{selectedTemplate.clientName}</div>
-              <button className="icon-btn" onClick={handleCloseTemplate}>
-                <Icon name="x" size={16} />
-              </button>
+              <button className="icon-btn" onClick={() => setSelectedTemplate(null)}><Icon name="x" size={16} /></button>
             </div>
             <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
                 <span className="badge badge-ok">Versão: {selectedTemplate.version}</span>
-                <span className="badge badge-progress">
-                  Atualizado: {new Date(selectedTemplate.lastUpdated).toLocaleDateString('pt-PT')}
-                </span>
+                <span className="badge badge-progress">Atualizado: {new Date(selectedTemplate.lastUpdated).toLocaleDateString('pt-PT')}</span>
                 <span className="badge">{selectedTemplate.totalItems} itens</span>
               </div>
-              
               {selectedTemplate.sections.map((section, idx) => (
                 <div key={section.id} style={{ marginBottom: 16 }}>
-                  <div style={{ 
-                    fontSize: 14, 
-                    fontWeight: 600, 
-                    color: '#1E2A3A',
-                    padding: '8px 0',
-                    borderBottom: '1px solid #E5E7EB',
-                    marginBottom: 8,
-                    display: 'flex',
-                    justifyContent: 'space-between'
-                  }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#1E2A3A', padding: '8px 0', borderBottom: '1px solid #E5E7EB', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
                     <span>{section.title}</span>
-                    <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>
-                      {section.items.length} itens
-                    </span>
+                    <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>{section.items.length} itens</span>
                   </div>
                   <ul style={{ margin: 0, paddingLeft: 20 }}>
                     {section.items.map(item => (
-                      <li key={item.id} style={{ 
-                        fontSize: 13, 
-                        color: '#4B5563',
-                        padding: '4px 0',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}>
+                      <li key={item.id} style={{ fontSize: 13, color: '#4B5563', padding: '4px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span>{item.label}</span>
-                        {item.weight > 1 && (
-                          <span style={{ 
-                            fontSize: 11, 
-                            color: '#888',
-                            background: '#F3F4F6',
-                            padding: '1px 10px',
-                            borderRadius: 10
-                          }}>
-                            Peso: {item.weight}
-                          </span>
-                        )}
+                        {item.weight > 1 && <span style={{ fontSize: 11, color: '#888', background: '#F3F4F6', padding: '1px 10px', borderRadius: 10 }}>Peso: {item.weight}</span>}
                       </li>
                     ))}
                   </ul>
@@ -496,14 +427,8 @@ export function TemplatesPage() {
               ))}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={handleCloseTemplate}>Fechar</button>
-              <button 
-                className="btn btn-danger" 
-                onClick={() => {
-                  handleDeleteTemplate(selectedTemplate.clientId);
-                  handleCloseTemplate();
-                }}
-              >
+              <button className="btn btn-secondary" onClick={() => setSelectedTemplate(null)}>Fechar</button>
+              <button className="btn btn-danger" onClick={() => { handleDeleteTemplate(selectedTemplate.clientId); setSelectedTemplate(null); }}>
                 <Icon name="trash" size={14} /> Remover
               </button>
             </div>
@@ -511,37 +436,19 @@ export function TemplatesPage() {
         </div>
       )}
 
-      {/* Grid de templates */}
       <div className="templates-grid">
         {filteredTemplates.map(template => (
           <div key={template.id} className="template-card">
             <div className="template-card-header">
-              <h3 className="client-name" title={template.name}>
-                {template.name}
-              </h3>
+              <h3 className="client-name" title={template.name}>{template.name}</h3>
               <span className="badge">{template.sections} secções</span>
             </div>
             <div className="template-card-body">
-              <p style={{ margin: '0 0 8px 0' }}>
-                <strong>{template.items}</strong> itens de inspeção
-              </p>
-              <p style={{ fontSize: 12, color: '#888', margin: '0 0 12px 0' }}>
-                Atualizado: {new Date(template.lastUpdated).toLocaleDateString('pt-PT')}
-              </p>
+              <p style={{ margin: '0 0 8px 0' }}><strong>{template.items}</strong> itens de inspeção</p>
+              <p style={{ fontSize: 12, color: '#888', margin: '0 0 12px 0' }}>Atualizado: {new Date(template.lastUpdated).toLocaleDateString('pt-PT')}</p>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button 
-                  className="btn btn-sm btn-secondary"
-                  onClick={() => handleViewTemplate(template.id)}
-                >
-                  👁️ Ver detalhes
-                </button>
-                <button 
-                  className="btn btn-sm btn-danger"
-                  onClick={() => handleDeleteTemplate(template.id)}
-                  style={{ padding: '4px 10px' }}
-                >
-                  <Icon name="trash" size={12} />
-                </button>
+                <button className="btn btn-sm btn-secondary" onClick={() => handleViewTemplate(template.id)}>👁️ Ver detalhes</button>
+                <button className="btn btn-sm btn-danger" onClick={() => handleDeleteTemplate(template.id)} style={{ padding: '4px 10px' }}><Icon name="trash" size={12} /></button>
               </div>
             </div>
           </div>
@@ -551,205 +458,40 @@ export function TemplatesPage() {
       {filteredTemplates.length === 0 && (
         <div className="empty-state">
           <div style={{ fontSize: 48, marginBottom: 16 }}>📂</div>
-          <p style={{ fontSize: 16, color: '#4B5563', margin: 0 }}>
-            {searchTerm ? 'Nenhum cliente encontrado com esse termo.' : 'Nenhum template carregado.'}
-          </p>
-          <p style={{ color: '#888', fontSize: 14 }}>
-            {searchTerm ? 'Tente outro termo de busca.' : 'Clique em "Importar Excel" para carregar os templates do arquivo.'}
-          </p>
+          <p style={{ fontSize: 16, color: '#4B5563', margin: 0 }}>{searchTerm ? 'Nenhum cliente encontrado.' : 'Nenhum template carregado.'}</p>
+          <p style={{ color: '#888', fontSize: 14 }}>{searchTerm ? 'Tente outro termo.' : 'Clique em "Importar Excel" para carregar.'}</p>
         </div>
       )}
 
       <style>{`
-        .templates-page {
-          padding: 0;
-        }
-        
-        .page-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          flex-wrap: wrap;
-          gap: 16px;
-          margin-bottom: 20px;
-        }
-        
-        .page-title {
-          font-size: 18px;
-          font-weight: 600;
-          color: #1E2A3A;
-        }
-        
-        .page-sub {
-          font-size: 13px;
-          color: #888;
-          margin-top: 2px;
-        }
-        
-        .header-actions {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-          align-items: center;
-        }
-        
-        .search-input {
-          padding: 8px 14px;
-          border: 1px solid #D1D5DB;
-          border-radius: 6px;
-          font-size: 13px;
-          min-width: 200px;
-          background: white;
-        }
-        
-        .search-input:focus {
-          outline: none;
-          border-color: #3B82F6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-        
-        .templates-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-          gap: 16px;
-          margin-top: 16px;
-        }
-        
-        .template-card {
-          background: white;
-          border: 1px solid #E5E7EB;
-          border-radius: 10px;
-          padding: 16px 18px;
-          transition: all 0.2s ease;
-        }
-        
-        .template-card:hover {
-          border-color: #3B82F6;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-        }
-        
-        .template-card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 10px;
-        }
-        
-        .client-name {
-          margin: 0;
-          font-size: 15px;
-          font-weight: 500;
-          color: #1E2A3A;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 160px;
-        }
-        
-        .badge {
-          background: #F3F4F6;
-          padding: 2px 12px;
-          border-radius: 12px;
-          font-size: 11px;
-          color: #4B5563;
-          font-weight: 500;
-          white-space: nowrap;
-        }
-        
-        .badge-ok {
-          background: #D1FAE5;
-          color: #065F46;
-        }
-        
-        .badge-progress {
-          background: #DBEAFE;
-          color: #1E40AF;
-        }
-        
-        .template-card-body {
-          color: #6B7280;
-          font-size: 13px;
-        }
-        
-        .btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 16px;
-          border: none;
-          border-radius: 6px;
-          font-size: 13px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-        
-        .btn-primary {
-          background: #1E2A3A;
-          color: white;
-        }
-        
-        .btn-primary:hover {
-          background: #2D3A4A;
-        }
-        
-        .btn-secondary {
-          background: #F3F4F6;
-          color: #374151;
-        }
-        
-        .btn-secondary:hover {
-          background: #E5E7EB;
-        }
-        
-        .btn-danger {
-          background: #FEF2F2;
-          color: #DC2626;
-        }
-        
-        .btn-danger:hover {
-          background: #FEE2E2;
-        }
-        
-        .btn-sm {
-          padding: 4px 12px;
-          font-size: 12px;
-        }
-        
-        .empty-state {
-          text-align: center;
-          padding: 60px 20px;
-          background: #F9FAFB;
-          border-radius: 12px;
-          border: 1px dashed #D1D5DB;
-        }
-        
-        .template-detail-modal {
-          max-width: 700px !important;
-          max-height: 90vh;
-        }
-        
-        .template-detail-modal .modal-body {
-          padding: 16px 20px;
-        }
-        
-        @media (max-width: 600px) {
-          .page-header {
-            flex-direction: column;
-          }
-          
-          .header-actions {
-            width: 100%;
-          }
-          
-          .search-input {
-            min-width: 100%;
-          }
-          
-          .templates-grid {
-            grid-template-columns: 1fr;
-          }
-        }
+        .templates-page { padding: 0; }
+        .page-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; }
+        .page-title { font-size: 18px; font-weight: 600; color: #1E2A3A; }
+        .page-sub { font-size: 13px; color: #888; margin-top: 2px; }
+        .header-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .search-input { padding: 8px 14px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 13px; min-width: 200px; background: white; }
+        .search-input:focus { outline: none; border-color: #3B82F6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        .templates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+        .template-card { background: white; border: 1px solid #E5E7EB; border-radius: 10px; padding: 16px 18px; transition: all 0.2s ease; }
+        .template-card:hover { border-color: #3B82F6; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .template-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .client-name { margin: 0; font-size: 15px; font-weight: 500; color: #1E2A3A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+        .badge { background: #F3F4F6; padding: 2px 12px; border-radius: 12px; font-size: 11px; color: #4B5563; font-weight: 500; white-space: nowrap; }
+        .badge-ok { background: #D1FAE5; color: #065F46; }
+        .badge-progress { background: #DBEAFE; color: #1E40AF; }
+        .template-card-body { color: #6B7280; font-size: 13px; }
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; }
+        .btn-primary { background: #1E2A3A; color: white; }
+        .btn-primary:hover { background: #2D3A4A; }
+        .btn-secondary { background: #F3F4F6; color: #374151; }
+        .btn-secondary:hover { background: #E5E7EB; }
+        .btn-danger { background: #FEF2F2; color: #DC2626; }
+        .btn-danger:hover { background: #FEE2E2; }
+        .btn-sm { padding: 4px 12px; font-size: 12px; }
+        .empty-state { text-align: center; padding: 60px 20px; background: #F9FAFB; border-radius: 12px; border: 1px dashed #D1D5DB; }
+        .template-detail-modal { max-width: 700px !important; max-height: 90vh; }
+        .template-detail-modal .modal-body { padding: 16px 20px; }
+        @media (max-width: 600px) { .page-header { flex-direction: column; } .header-actions { width: 100%; } .search-input { min-width: 100%; } .templates-grid { grid-template-columns: 1fr; } }
       `}</style>
     </div>
   );
@@ -763,9 +505,7 @@ export function AuditPage({ auditLogs }) {
   const [search, setSearch] = useState('');
 
   let filtered = auditLogs;
-  if (filter !== 'all') {
-    filtered = filtered.filter(log => log.type === filter);
-  }
+  if (filter !== 'all') filtered = filtered.filter(log => log.type === filter);
   if (search) {
     const term = search.toLowerCase();
     filtered = filtered.filter(log => 
@@ -783,18 +523,8 @@ export function AuditPage({ auditLogs }) {
           <div className="page-sub">{auditLogs.length} registos • {filtered.length} filtrados</div>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <input
-            type="text"
-            placeholder="Buscar..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ padding: '6px 12px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 13 }}
-          />
-          <select 
-            value={filter} 
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ padding: '6px 12px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 13, background: 'white' }}
-          >
+          <input type="text" placeholder="Buscar..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '6px 12px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 13 }} />
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: '6px 12px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 13, background: 'white' }}>
             <option value="all">Todos</option>
             <option value="login">Login</option>
             <option value="logout">Logout</option>
@@ -818,23 +548,16 @@ export function AuditPage({ auditLogs }) {
           <tbody>
             {filtered.length === 0 && (
               <tr><td colSpan={5} style={{ textAlign: 'center', padding: '30px', color: '#888' }}>
-                {search ? 'Nenhum registo encontrado com esse termo.' : 'Nenhum registo ainda.'}
+                {search ? 'Nenhum registo encontrado.' : 'Nenhum registo ainda.'}
               </td></tr>
             )}
             {filtered.map(log => (
               <tr key={log.id}>
-                <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>
-                  {new Date(log.timestamp).toLocaleString('pt-PT')}
-                </td>
+                <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{new Date(log.timestamp).toLocaleString('pt-PT')}</td>
                 <td style={{ fontWeight: 500 }}>{log.user}</td>
                 <td>{log.action}</td>
                 <td>
-                  <span className={`badge ${
-                    log.type === 'login' ? 'badge-ok' : 
-                    log.type === 'logout' ? 'badge-closed' : 
-                    log.type === 'capa_alert' ? 'badge-danger' : 
-                    'badge-progress'
-                  }`}>
+                  <span className={`badge ${log.type === 'login' ? 'badge-ok' : log.type === 'logout' ? 'badge-closed' : log.type === 'capa_alert' ? 'badge-danger' : 'badge-progress'}`}>
                     {log.type}
                   </span>
                 </td>
@@ -849,9 +572,31 @@ export function AuditPage({ auditLogs }) {
 }
 
 // ============================================================
-// SETTINGS PAGE
+// COMPONENTE AUXILIAR
 // ============================================================
-export function SettingsPage() {
+function StatsRow({ label, value, onClick }) {
+  return (
+    <div 
+      style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        padding: '10px 0', 
+        borderBottom: '1px solid #E5E7EB',
+        cursor: onClick ? 'pointer' : 'default'
+      }}
+      onClick={onClick}
+    >
+      <span style={{ color: '#6B7280', fontSize: 13 }}>{label}</span>
+      <span style={{ fontWeight: 600, fontSize: 14 }}>{value}</span>
+    </div>
+  );
+}
+
+// ============================================================
+// SETTINGS PAGE COM LIMPEZA DO SUPABASE
+// ============================================================
+export function SettingsPage({ inspections, setInspections }) {
   const fileInputRef = useRef(null);
   const [stats, setStats] = useState({
     inspections: 0,
@@ -859,53 +604,190 @@ export function SettingsPage() {
     locations: 0,
     templates: 0,
     logs: 0,
-    storageKB: "0.0"
+    storageKB: "0.0",
+    supabaseCount: null
   });
+  const [cleanupStatus, setCleanupStatus] = useState(null);
+  const [deleteDate, setDeleteDate] = useState('');
 
-  // Load statistics when the page opens
   useEffect(() => {
-    async function loadStats() {
-      try {
-        const [inspections, users, locations, logs] = await Promise.all([
-          dataStore.get("fims_inspections"),
-          dataStore.get("fims_users"),
-          dataStore.get("fims_locations"),
-          dataStore.get("fims_logs"),
-        ]);
-
-        const templates = JSON.parse(localStorage.getItem("fims_template_clients") || "[]");
-
-        // Approximate size (IndexedDB size is harder to measure precisely)
-        let total = 0;
-        for (let key in localStorage) {
-          if (localStorage.hasOwnProperty(key)) {
-            total += localStorage[key].length * 2;
-          }
-        }
-
-        setStats({
-          inspections: (inspections || []).length,
-          users: (users || []).length,
-          locations: (locations || []).length,
-          templates: templates.length,
-          logs: (logs || []).length,
-          storageKB: (total / 1024).toFixed(1)
-        });
-      } catch (err) {
-        console.error("Error loading stats:", err);
-      }
-    }
     loadStats();
-  }, []);
+  }, [inspections]);
 
+  const loadStats = async () => {
+    try {
+      const [insp, users, locs, logs] = await Promise.all([
+        dataStore.get("fims_inspections"),
+        dataStore.get("fims_users"),
+        dataStore.get("fims_locations"),
+        dataStore.get("fims_logs"),
+      ]);
+
+      const templates = JSON.parse(localStorage.getItem("fims_template_clients") || "[]");
+
+      let total = 0;
+      for (let key in localStorage) {
+        if (localStorage.hasOwnProperty(key)) {
+          total += localStorage[key].length * 2;
+        }
+      }
+
+      setStats(prev => ({
+        ...prev,
+        inspections: (insp || []).length,
+        users: (users || []).length,
+        locations: (locs || []).length,
+        templates: templates.length,
+        logs: (logs || []).length,
+        storageKB: (total / 1024).toFixed(1)
+      }));
+
+      // Buscar contagem do Supabase em background
+      dataService.countInspections().then(result => {
+        if (result.success) {
+          setStats(prev => ({ ...prev, supabaseCount: result.count }));
+        }
+      });
+    } catch (err) {
+      console.error("Error loading stats:", err);
+    }
+  };
+
+  // ============================================================
+  // ELIMINAR TODAS AS INSPEÇÕES (LOCAL + SUPABASE)
+  // ============================================================
+  const handleDeleteAllInspections = async () => {
+    if (!window.confirm('⚠️ ATENÇÃO: Todas as inspeções serão eliminadas PERMANENTEMENTE do Supabase e localmente.')) return;
+    if (!window.confirm('🔥 ÚLTIMA CHANCE: Esta acção é IRREVERSÍVEL! Continuar?')) return;
+
+    setCleanupStatus('loading');
+
+    try {
+      // 1. Eliminar do Supabase
+      const result = await dataService.deleteAllInspections();
+      
+      if (result.success) {
+        // 2. Eliminar localmente
+        setInspections([]);
+        await dataStore.remove('fims_inspections');
+        
+        // 3. Recarregar stats
+        await loadStats();
+        
+        setCleanupStatus('success');
+        setTimeout(() => setCleanupStatus(null), 3000);
+      } else {
+        setCleanupStatus('error');
+        alert('Erro ao eliminar: ' + result.error);
+      }
+    } catch (err) {
+      setCleanupStatus('error');
+      alert('Erro: ' + err.message);
+    }
+  };
+
+  // ============================================================
+  // ELIMINAR INSPEÇÕES POR DATA (LOCAL + SUPABASE)
+  // ============================================================
+  const handleDeleteByDate = async () => {
+    if (!deleteDate) {
+      setDeleteDate(new Date().toISOString().split("T")[0]);
+      return;
+    }
+
+    setCleanupStatus('loading');
+
+    try {
+      const result = await dataService.deleteInspectionsBeforeDate(deleteDate);
+      
+      if (result.success) {
+        // Recarregar do Supabase
+        const freshResult = await dataService.fetchInspections();
+        if (freshResult.success) {
+          setInspections(freshResult.inspections);
+          await dataStore.set('fims_inspections', freshResult.inspections);
+        }
+        
+        await loadStats();
+        setCleanupStatus('success');
+        alert(`✅ Eliminadas ${result.deleted} inspeções anteriores a ${deleteDate}`);
+        setDeleteDate('');
+        setTimeout(() => setCleanupStatus(null), 3000);
+      } else {
+        setCleanupStatus('error');
+        alert('Erro: ' + (result.error || result.message));
+      }
+    } catch (err) {
+      setCleanupStatus('error');
+      alert('Erro: ' + err.message);
+    }
+  };
+
+  // ============================================================
+  // SINCRONIZAR LOCAL → SUPABASE
+  // ============================================================
+  const handleSyncToSupabase = async () => {
+    setCleanupStatus('loading');
+    
+    try {
+      const localInspections = await dataStore.get('fims_inspections') || [];
+      
+      if (localInspections.length === 0) {
+        setCleanupStatus('error');
+        alert('Nenhuma inspeção local para sincronizar.');
+        return;
+      }
+
+      const result = await dataService.syncInspections(localInspections);
+      
+      if (result) {
+        await loadStats();
+        setCleanupStatus('success');
+        alert(`✅ ${localInspections.length} inspeções sincronizadas com o Supabase.`);
+        setTimeout(() => setCleanupStatus(null), 3000);
+      } else {
+        setCleanupStatus('error');
+        alert('Erro ao sincronizar.');
+      }
+    } catch (err) {
+      setCleanupStatus('error');
+      alert('Erro: ' + err.message);
+    }
+  };
+
+  // ============================================================
+  // PUXAR DO SUPABASE (substitui local)
+  // ============================================================
+  const handlePullFromSupabase = async () => {
+    setCleanupStatus('loading');
+    
+    try {
+      const result = await dataService.fetchInspections();
+      
+      if (result.success) {
+        setInspections(result.inspections);
+        await dataStore.set('fims_inspections', result.inspections);
+        
+        await loadStats();
+        setCleanupStatus('success');
+        alert(`✅ ${result.inspections.length} inspeções puxadas do Supabase.`);
+        setTimeout(() => setCleanupStatus(null), 3000);
+      } else {
+        setCleanupStatus('error');
+        alert('Erro ao buscar do Supabase.');
+      }
+    } catch (err) {
+      setCleanupStatus('error');
+      alert('Erro: ' + err.message);
+    }
+  };
+
+  // ============================================================
+  // BACKUP & RESTORE
+  // ============================================================
   const handleExport = async () => {
     try {
-      const [
-        inspections,
-        users,
-        locations,
-        logs
-      ] = await Promise.all([
+      const [inspections, users, locations, logs] = await Promise.all([
         dataStore.get("fims_inspections"),
         dataStore.get("fims_users"),
         dataStore.get("fims_locations"),
@@ -957,13 +839,11 @@ export function SettingsPage() {
       try {
         const data = JSON.parse(event.target.result);
 
-        // Restore heavy data to IndexedDB
         if (data.fims_inspections) await dataStore.set("fims_inspections", data.fims_inspections);
         if (data.fims_users) await dataStore.set("fims_users", data.fims_users);
         if (data.fims_locations) await dataStore.set("fims_locations", data.fims_locations);
         if (data.fims_logs) await dataStore.set("fims_logs", data.fims_logs);
 
-        // Restore light data to localStorage
         const lightKeys = [
           "fims_notifs", "fims_messages", "fims_announcements",
           "fims_dismissed", "fims_current_user", "fims_templates", "fims_template_clients"
@@ -995,15 +875,11 @@ export function SettingsPage() {
   };
 
   const handleClearAll = async () => {
-    if (!window.confirm("⚠️ ATENÇÃO: Isso irá apagar TODOS os dados (inspeções, utilizadores, templates, etc.). Tem certeza?")) return;
-    if (!window.confirm("⚠️ ÚLTIMO AVISO: Esta ação é IRREVERSÍVEL. Continuar?")) return;
+    if (!window.confirm("⚠️ ATENÇÃO: Isso irá apagar TODOS os dados. Tem certeza?")) return;
+    if (!window.confirm("🔥 ÚLTIMO AVISO: Esta ação é IRREVERSÍVEL!")) return;
 
-    // Clear IndexedDB
     await dataStore.clear();
-
-    // Clear localStorage
     localStorage.clear();
-
     alert("Todos os dados foram removidos. A aplicação vai recarregar.");
     window.location.reload();
   };
@@ -1013,15 +889,121 @@ export function SettingsPage() {
       <div className="page-header">
         <div>
           <div className="page-title">⚙️ Configurações do Sistema</div>
-          <div className="page-sub">Backup, recuperação e gestão de dados</div>
+          <div className="page-sub">Gestão de dados, sincronização e backup</div>
         </div>
       </div>
 
+      {/* ============================================================ */}
+      {/* GESTÃO DE INSPEÇÕES COM SUPABASE */}
+      {/* ============================================================ */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3 style={{ fontSize: 15, marginBottom: 12, color: "#1E2A3A", display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>🗄️ Gestão de Inspeções</span>
+          {stats.supabaseCount !== null && (
+            <span className="badge" style={{ background: stats.supabaseCount === stats.inspections ? '#D1FAE5' : '#FEE2E2' }}>
+              {stats.supabaseCount === stats.inspections ? '✓ Sincronizado' : `⚠️ ${stats.supabaseCount} no Supabase vs ${stats.inspections} local`}
+            </span>
+          )}
+        </h3>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
+          <div style={{ background: '#F8F7F4', padding: 12, borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, color: '#888' }}>Local</div>
+            <div style={{ fontSize: 20, fontWeight: 600 }}>{stats.inspections}</div>
+          </div>
+          <div style={{ background: '#F8F7F4', padding: 12, borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, color: '#888' }}>Supabase</div>
+            <div style={{ fontSize: 20, fontWeight: 600 }}>{stats.supabaseCount ?? '...'}</div>
+          </div>
+          <div style={{ background: '#F8F7F4', padding: 12, borderRadius: 8, textAlign: 'center' }}>
+            <div style={{ fontSize: 11, color: '#888' }}>Diferença</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: stats.supabaseCount === stats.inspections ? '#059669' : '#D97706' }}>
+              {stats.supabaseCount !== null ? Math.abs(stats.inspections - stats.supabaseCount) : '...'}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+          <button 
+            className="btn btn-primary" 
+            onClick={handlePullFromSupabase}
+            disabled={cleanupStatus === 'loading'}
+          >
+            {cleanupStatus === 'loading' ? '⏳ Puxando...' : '⬇️ Puxar do Supabase'}
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={handleSyncToSupabase}
+            disabled={cleanupStatus === 'loading'}
+          >
+            {cleanupStatus === 'loading' ? '⏳ Sincronizando...' : '⬆️ Enviar para Supabase'}
+          </button>
+        </div>
+
+        {cleanupStatus === 'success' && (
+          <div style={{ background: '#ECFDF5', padding: 10, borderRadius: 6, marginBottom: 16, color: '#065F46', fontSize: 13 }}>
+            ✅ Operação concluída com sucesso!
+          </div>
+        )}
+        {cleanupStatus === 'error' && (
+          <div style={{ background: '#FEF2F2', padding: 10, borderRadius: 6, marginBottom: 16, color: '#991B1B', fontSize: 13 }}>
+            ❌ Erro na operação
+          </div>
+        )}
+      </div>
+
+      {/* ============================================================ */}
+      {/* LIMPEZA DE DADOS */}
+      {/* ============================================================ */}
+      <div className="card" style={{ marginBottom: 16, border: '1px solid #FCA5A5' }}>
+        <h3 style={{ fontSize: 15, marginBottom: 12, color: '#A32D2D', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>⚠️ Zona de Perigo</span>
+        </h3>
+        <p style={{ color: '#993C1D', fontSize: 13, marginBottom: 16 }}>
+          Estas acções são irreversíveis. Os dados serão eliminados do Supabase e de todos os dispositivos.
+        </p>
+
+        {/* Eliminar por data */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8, color: '#555' }}>
+            📅 Eliminar inspeções anteriores a uma data específica:
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <input 
+              type="date" 
+              value={deleteDate}
+              onChange={e => setDeleteDate(e.target.value)}
+              style={{ padding: '8px 12px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 13 }}
+            />
+            <button 
+              className="btn btn-secondary"
+              style={{ borderColor: '#EF9F27', color: '#92400E' }}
+              onClick={handleDeleteByDate}
+              disabled={!deleteDate || cleanupStatus === 'loading'}
+            >
+              {cleanupStatus === 'loading' ? 'Eliminando...' : '🗑️ Eliminar Anteriores a'}
+            </button>
+          </div>
+        </div>
+
+        {/* Eliminar todas */}
+        <button 
+          className="btn btn-danger" 
+          onClick={handleDeleteAllInspections}
+          disabled={cleanupStatus === 'loading'}
+          style={{ width: '100%', justifyContent: 'center', background: '#FEE2E2', borderColor: '#FCA5A5', color: '#A32D2D' }}
+        >
+          {cleanupStatus === 'loading' ? '⏳ Eliminando...' : '🗑️ ELIMINAR TODAS AS INSPEÇÕES'}
+        </button>
+      </div>
+
+      {/* ============================================================ */}
+      {/* BACKUP & RECOVERY */}
+      {/* ============================================================ */}
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ fontSize: 15, marginBottom: 12, color: "#1E2A3A" }}>💾 Backup & Recovery</h3>
         <p style={{ fontSize: 13, color: "#666", marginBottom: 16 }}>
-          Faça o download de um ficheiro de backup completo com todos os dados (inspeções, utilizadores, templates, logs, etc.). 
-          Guarde este ficheiro num local seguro. Se perder os dados, pode restaurá-los instantaneamente.
+          Faça download de um backup completo. Guarde num local seguro para restaurar se necessário.
         </p>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <button className="btn btn-primary" onClick={handleExport}>
@@ -1034,9 +1016,12 @@ export function SettingsPage() {
         </div>
       </div>
 
+      {/* ============================================================ */}
+      {/* ESTATÍSTICAS */}
+      {/* ============================================================ */}
       <div className="card" style={{ marginBottom: 16 }}>
         <h3 style={{ fontSize: 15, marginBottom: 12, color: "#1E2A3A" }}>📊 Estatísticas</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 12 }}>
           {[
             ["Inspeções", stats.inspections],
             ["Utilizadores", stats.users],
@@ -1053,38 +1038,39 @@ export function SettingsPage() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h3 style={{ fontSize: 15, marginBottom: 12, color: "#1E2A3A" }}>🗑️ Gestão de Dados</h3>
+      {/* ============================================================ */}
+      {/* LIMPEZA LOCAL */}
+      {/* ============================================================ */}
+      <div className="card">
+        <h3 style={{ fontSize: 15, marginBottom: 12, color: "#1E2A3A" }}>🧹 Limpeza Local</h3>
+        <p style={{ fontSize: 13, color: "#666", marginBottom: 16 }}>
+          ⚠️ Estas acções só afectam dados locais (não o Supabase).
+        </p>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <button className="btn btn-danger" onClick={handleClearTemplates}>
-            <Icon name="trash" size={14} /> Remover Todos os Templates
+          <button className="btn btn-secondary" onClick={handleClearTemplates}>
+            <Icon name="trash" size={14} /> Remover Templates Locais
           </button>
-          <button className="btn btn-danger" onClick={handleClearAll} style={{ background: '#DC2626' }}>
-            <Icon name="trash" size={14} /> 🔴 Apagar Todos os Dados
+          <button className="btn btn-danger" onClick={handleClearAll} style={{ background: '#FEE2E2', borderColor: '#FCA5A5', color: '#A32D2D' }}>
+            <Icon name="trash" size={14} /> 🔴 Apagar Tudo (Local)
           </button>
         </div>
-        <p style={{ fontSize: 12, color: "#888", marginTop: 12 }}>
-          ⚠️ Estas ações são irreversíveis. Faça um backup antes de proceder.
-        </p>
       </div>
 
-      <div className="card">
-        <h3 style={{ fontSize: 15, marginBottom: 12, color: "#1E2A3A" }}>ℹ️ Informação do Sistema</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-          {[
-            ["Versão", "FIMS v1.0.0"],
-            ["Ambiente", "Produção (Frontend)"],
-            ["Base de Dados", "IndexedDB + Supabase"],
-            ["Stack", "React + Vite"],
-            ["Templates", stats.templates + " clientes"]
-          ].map(([k, v]) => (
-            <div key={k} style={{ background: "#F8F7F4", borderRadius: 8, padding: "10px 14px" }}>
-              <div style={{ fontSize: 11, color: "#888" }}>{k}</div>
-              <div style={{ fontSize: 13, fontWeight: 500, marginTop: 2 }}>{v}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+      <style>{`
+        .badge { background: #F3F4F6; padding: 2px 12px; border-radius: 12px; font-size: 11px; color: #4B5563; font-weight: 500; white-space: nowrap; }
+        .badge-ok { background: #D1FAE5; color: #065F46; }
+        .badge-progress { background: #DBEAFE; color: #1E40AF; }
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: 1px solid transparent; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s ease; }
+        .btn-primary { background: #1E2A3A; color: white; border-color: #1E2A3A; }
+        .btn-primary:hover { background: #2D3A4A; }
+        .btn-primary:disabled { background: #9CA3AF; cursor: not-allowed; }
+        .btn-secondary { background: #F3F4F6; color: #374151; border-color: #E5E7EB; }
+        .btn-secondary:hover { background: #E5E7EB; }
+        .btn-secondary:disabled { background: #E5E7EB; color: #9CA3AF; cursor: not-allowed; }
+        .btn-danger { background: #FEF2F2; color: #DC2626; border-color: #FCA5A5; }
+        .btn-danger:hover { background: #FEE2E2; }
+        .btn-danger:disabled { background: #FEE2E2; color: #9CA3AF; cursor: not-allowed; }
+      `}</style>
     </div>
   );
 }

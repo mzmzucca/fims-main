@@ -213,5 +213,89 @@ export const dataService = {
       })
       .subscribe((status) => { console.log('[dataService] Locations realtime status:', status); });
     return () => { console.log('[dataService] Unsubscribing from locations'); supabase.removeChannel(channel); };
+  },
+
+  /**
+   * Eliminar todas as inspeções do Supabase
+   */
+  async deleteAllInspections() {
+    try {
+      // Supabase não permite DELETE sem WHERE, usar um truque
+      const { data: allIds } = await supabase
+        .from('fims_inspections')
+        .select('id')
+        .limit(10000);
+      
+      if (allIds && allIds.length > 0) {
+        const idsToDelete = allIds.map(row => row.id);
+        
+        // Deletar em lotes de 500
+        const batchSize = 500;
+        for (let i = 0; i < idsToDelete.length; i += batchSize) {
+          const batch = idsToDelete.slice(i, i + batchSize);
+          const { error } = await supabase
+            .from('fims_inspections')
+            .delete()
+            .in('id', batch);
+          
+          if (error) {
+            console.warn('[dataService] Erro ao deletar lote:', error.message);
+          }
+        }
+      }
+      
+      console.log('[dataService] Todas as inspeções eliminadas do Supabase');
+      return { success: true };
+    } catch (error) {
+      console.error('[dataService] Erro ao eliminar todas:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
+   * Eliminar inspeções anteriores a uma data
+   */
+  async deleteInspectionsBeforeDate(date) {
+    try {
+      // Contar primeiro
+      const { count } = await supabase
+        .from('fims_inspections')
+        .select('*', { count: 'exact', head: true })
+        .lt('date', date);
+      
+      if (count === 0) {
+        return { success: true, deleted: 0, message: 'Nenhuma inspeção anterior a essa data' };
+      }
+      
+      // Deletar
+      const { error } = await supabase
+        .from('fims_inspections')
+        .delete()
+        .lt('date', date);
+      
+      if (error) throw error;
+      
+      console.log(`[dataService] Eliminadas ${count} inspeções anteriores a ${date}`);
+      return { success: true, deleted: count };
+    } catch (error) {
+      console.error('[dataService] Erro ao eliminar por data:', error);
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
+   * Contar inspeções no Supabase
+   */
+  async countInspections() {
+    try {
+      const { count, error } = await supabase
+        .from('fims_inspections')
+        .select('*', { count: 'exact', head: true });
+      
+      if (error) throw error;
+      return { success: true, count: count || 0 };
+    } catch (error) {
+      return { success: false, count: 0, error: error.message };
+    }
   }
 };
