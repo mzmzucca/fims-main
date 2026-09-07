@@ -1,6 +1,5 @@
 // src/services/dataService.js
 import { supabase } from '../lib/supabase';
-
 export const dataService = {
   async fetchInspections() {
     try {
@@ -51,6 +50,34 @@ export const dataService = {
     }
   },
 
+  async fetchUsers() {
+    try {
+      const { data, error } = await supabase
+        .from('fims_users')
+        .select('id, name, email, role, active');
+        
+      if (error) { 
+        console.warn('[dataService] fetchUsers error:', error.message); 
+        return { success: false, users: [] }; 
+      }
+      
+      // Mapear os dados para garantir que tenham a estrutura que o frontend espera
+      const users = (data || []).map(row => ({
+        id: row.id,
+        name: row.name || 'Sem Nome',
+        email: row.email || '',
+        role: row.role || 'inspector',
+        active: row.active !== false // Se for nulo, assume true
+      }));
+      
+      console.log(`[dataService] Fetched ${users.length} users from fims_users`);
+      return { success: true, users };
+    } catch (error) { 
+      console.error('[dataService] fetchUsers exception:', error); 
+      return { success: false, users: [] }; 
+    }
+  },
+
   async saveInspection(inspection) {
     try {
       const row = { 
@@ -78,7 +105,6 @@ export const dataService = {
       return false; 
     }
   },
-
   async deleteInspection(id) {
     try {
       const { error } = await supabase.from('fims_inspections').delete().eq('id', String(id));
@@ -86,7 +112,6 @@ export const dataService = {
       return true;
     } catch (error) { console.error('[dataService] deleteInspection exception:', error); return false; }
   },
-
   async syncInspections(inspections) {
     try {
       if (!inspections || inspections.length === 0) return true;
@@ -126,7 +151,6 @@ export const dataService = {
       return false; 
     }
   },
-
   async fetchLocations() {
     try {
       const { data, error } = await supabase.from('fims_locations').select('*').order('name');
@@ -136,7 +160,6 @@ export const dataService = {
       return { success: true, locations };
     } catch (error) { console.error('[dataService] fetchLocations exception:', error); return { success: false, locations: [] }; }
   },
-
   async syncLocations(locations) {
     try {
       if (!locations || locations.length === 0) return true;
@@ -153,7 +176,6 @@ export const dataService = {
       return errorCount === 0;
     } catch (error) { console.error('[dataService] syncLocations exception:', error); return false; }
   },
-
   subscribeToInspectionChanges(onChange) {
     console.log('[dataService] Setting up inspections real-time...');
     
@@ -202,7 +224,6 @@ export const dataService = {
       supabase.removeChannel(channel); 
     };
   },
-
   subscribeToLocationChanges(onChange) {
     console.log('[dataService] Setting up locations real-time...');
     const channelName = `fims-locations-${Date.now()}`;
@@ -214,7 +235,6 @@ export const dataService = {
       .subscribe((status) => { console.log('[dataService] Locations realtime status:', status); });
     return () => { console.log('[dataService] Unsubscribing from locations'); supabase.removeChannel(channel); };
   },
-
   /**
    * Eliminar todas as inspeções do Supabase
    */
@@ -251,7 +271,6 @@ export const dataService = {
       return { success: false, error: error.message };
     }
   },
-
   /**
    * Eliminar inspeções anteriores a uma data
    */
@@ -282,7 +301,6 @@ export const dataService = {
       return { success: false, error: error.message };
     }
   },
-
   /**
    * Contar inspeções no Supabase
    */
@@ -299,3 +317,4 @@ export const dataService = {
     }
   }
 };
+

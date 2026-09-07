@@ -187,8 +187,24 @@ function AppContent() {
           dataStore.get(STORAGE_KEYS.LOGS),
         ]);
         setInspections(savedInspections || genSeedInspections());
-        setUsers(savedUsers || SEED_USERS);
         setLocations(savedLocations || SEED_LOCATIONS);
+        
+        // Buscar usuários reais da tabela fims_users no Supabase
+        try {
+          const { dataService } = await import('./services/dataService');
+          const result = await dataService.fetchUsers();
+          if (result.success && result.users.length > 0) {
+            setUsers(result.users);
+            dataStore.set(STORAGE_KEYS.USERS, result.users); // Atualiza o cache local
+            console.log("[App] Usuários carregados do Supabase:", result.users.length);
+          } else {
+            // Se não conseguir buscar do Supabase, usa o que tem no cache ou os seed
+            setUsers(savedUsers || SEED_USERS);
+          }
+        } catch (e) {
+          console.error("Erro ao buscar usuários:", e);
+          setUsers(savedUsers || SEED_USERS);
+        }
         setAuditLogs(savedLogs || []);
         // 2. Load light session data from localStorage
         const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
@@ -531,11 +547,18 @@ function AppContent() {
     addAuditLog(currentUser, "Excluir", "inspection", `Excluiu a inspeção ID: ${id}`);
   };
   
-  const handleCreateInspection = (insp) => {
+  const handleCreateInspection = async (insp) => {
     setInspections(prev => [insp, ...prev]);
     setShowNewModal(false);
     setEditingInspection(insp);
     setPage("inspections");
+    // SALVAR NO SUPABASE
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(insp);
+    } catch (error) {
+      console.error("Erro ao salvar nova inspeção no Supabase:", error);
+    }
   };
   
   const handleUpdateInspection = (updated) => {
@@ -544,7 +567,7 @@ function AppContent() {
     if (updated.status === "needs_corrections") notify(updated.inspector_id, `A inspeção de ${updated.location_name} foi rejeitada. Veja as correções necessárias.`, "inspections");
     if (updated.status === "reviewed") notify(2, `Uma inspeção foi aprovada por ${currentUser.name}. Pronta para envio ao cliente.`, "inspections");
   };
-  const handleCreateSchedule = (tasks) => {
+  const handleCreateSchedule = async (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
       const template = getClientTemplate(task.location_name);
       const templateSections = template.sections || [];
@@ -574,9 +597,18 @@ function AppContent() {
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     setShowScheduleModal(false);
     addAuditLog(currentUser, "Despacho Criado", "schedule", `Agendou ${tasksWithTemplates.length} tarefa(s)`);
-    tasksWithTemplates.forEach(t => {
-      if(t.inspector_id) notify(t.inspector_id, `Nova tarefa agendada para ${t.date} no local ${t.location_name}.`, "schedule");
-    });
+    
+    // SALVAR NO SUPABASE
+    try {
+      const { dataService } = await import('./services/dataService');
+      for (const task of tasksWithTemplates) {
+        await dataService.saveInspection(task);
+        if(task.inspector_id) notify(task.inspector_id, `Nova tarefa agendada para ${task.date} no local ${task.location_name}.`, "schedule");
+      }
+    } catch (error) {
+      console.error("Erro ao salvar despacho no Supabase:", error);
+      alert("Erro ao salvar o agendamento no banco de dados.");
+    }
   };
   const handleBulkSchedule = (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
