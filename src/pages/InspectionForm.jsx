@@ -175,7 +175,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
 
   const addPhoto = async (entityId, file) => {
     const meta = await photoStore.add(inspection.id, entityId, file);
-    meta.url = URL.createObjectURL(file);
+   // meta.url = URL.createObjectURL(file);
     setPhotosByItem(prev => ({ ...prev, [entityId]: [...(prev[entityId] || []), meta] }));
   };
 

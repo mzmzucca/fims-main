@@ -1,103 +1,88 @@
-const PHOTO_DB_NAME = "fims_photos_db";
-const PHOTO_DB_VERSION = 1;
-const PHOTO_STORE = "photos";
-const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10MB cap
+// src/lib/photoStore.js
+import { supabase } from '../lib/supabase';
 
-let _photoDbPromise = null;
-
-function openPhotoDB() {
-  if (_photoDbPromise) return _photoDbPromise;
-  _photoDbPromise = new Promise((resolve, reject) => {
-    if (typeof indexedDB === "undefined") {
-      reject(new Error("IndexedDB not available in this environment"));
-      return;
-    }
-    const req = indexedDB.open(PHOTO_DB_NAME, PHOTO_DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(PHOTO_STORE)) {
-        const store = db.createObjectStore(PHOTO_STORE, { keyPath: "id" });
-        store.createIndex("by_inspection", "inspectionId", { unique: false });
-        store.createIndex("by_item", ["inspectionId", "itemId"], { unique: false });
-        store.createIndex("by_sync_status", "syncStatus", { unique: false });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  return _photoDbPromise;
-}
-
-function idbRequest(request) {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-function genId() { return Date.now() + Math.random().toString(36).slice(2); }
+const BUCKET_NAME = 'inspection-photos';
 
 export const photoStore = {
-  async add(inspectionId, itemId, file) {
-    if (!file.type || !file.type.startsWith("image/")) {
-      throw new Error("Apenas ficheiros de imagem são permitidos.");
+  async add(inspectionId, entityId, file) {
+    try {
+      // Criar um nome único para o ficheiro
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${inspectionId}/${entityId}/${Date.now()}.${fileExt}`;
+      
+      // Fazer o upload para o Supabase Storage
+      const { error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .upload(fileName, file);
+
+      if (error) throw error;
+
+      // Obter o link público da imagem
+      const { data: { publicUrl } } = supabase.storage
+        .from(BUCKET_NAME)
+        .getPublicUrl(fileName);
+
+      return {
+        id: fileName,
+        url: publicUrl,
+        filename: file.name,
+        inspection_id: inspectionId,
+        entity_id: entityId
+      };
+    } catch (error) {
+      console.error('[photoStore] Erro ao fazer upload:', error);
+      throw error;
     }
-    if (file.size > MAX_PHOTO_BYTES) {
-      throw new Error("A foto excede o limite de 10MB.");
+  },
+
+  async remove(photoId) {
+    try {
+      // photoId neste caso é o caminho do ficheiro no Supabase
+      const { error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .remove([photoId]);
+      if (error) throw error;
+    } catch (error) {
+      console.error('[photoStore] Erro ao remover:', error);
     }
-    const db = await openPhotoDB();
-    const record = {
-      id: genId(),
-      inspectionId, itemId,
-      blob: file,
-      filename: file.name || `foto-${Date.now()}.jpg`,
-      mimeType: file.type,
-      size: file.size,
-      createdAt: new Date().toISOString(),
-      syncStatus: "pending",
-    };
-    const tx = db.transaction(PHOTO_STORE, "readwrite");
-    tx.objectStore(PHOTO_STORE).add(record);
-    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
-    const { blob, ...meta } = record;
-    return meta;
   },
 
   async listByInspection(inspectionId) {
-    const db = await openPhotoDB();
-    const tx = db.transaction(PHOTO_STORE, "readonly");
-    const idx = tx.objectStore(PHOTO_STORE).index("by_inspection");
-    const records = await idbRequest(idx.getAll(IDBKeyRange.only(inspectionId)));
-    const grouped = {};
-    for (const r of records.sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
-      const { blob, ...meta } = r;
-      meta.url = URL.createObjectURL(blob);
-      (grouped[r.itemId] ||= []).push(meta);
+    try {
+      // Listar todos os ficheiros dentro da pasta da inspeção
+      const { data, error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .list(inspectionId, { recursive: true });
+
+      if (error || !data) return {};
+
+      const grouped = {};
+      
+      data.forEach(file => {
+        // Ignorar pastas vazias
+        if (!file.name.includes('.')) return; 
+        
+        // O caminho completo é inspectionId/nomeDoFicheiro
+        const fullPath = `${inspectionId}/${file.name}`;
+        const entityId = file.name.split('/')[0]; // Extrair o entityId do nome do ficheiro
+        
+        if (!grouped[entityId]) grouped[entityId] = [];
+        
+        const { data: { publicUrl } } = supabase.storage
+          .from(BUCKET_NAME)
+          .getPublicUrl(fullPath);
+
+        grouped[entityId].push({
+          id: fullPath,
+          url: publicUrl,
+          filename: file.name
+        });
+      });
+
+      return grouped;
+    } catch (error) {
+      console.error('[photoStore] Erro ao listar fotos:', error);
+      return {};
     }
-    return grouped;
-  },
-
-  async remove(id) {
-    const db = await openPhotoDB();
-    const tx = db.transaction(PHOTO_STORE, "readwrite");
-    tx.objectStore(PHOTO_STORE).delete(id);
-    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
-  },
-
-  async listPending() {
-    const db = await openPhotoDB();
-    const tx = db.transaction(PHOTO_STORE, "readonly");
-    const idx = tx.objectStore(PHOTO_STORE).index("by_sync_status");
-    const records = await idbRequest(idx.getAll(IDBKeyRange.only("pending")));
-    return records.map(({ blob, ...meta }) => meta);
-  },
-
-  async markSynced(id) {
-    const db = await openPhotoDB();
-    const tx = db.transaction(PHOTO_STORE, "readwrite");
-    const store = tx.objectStore(PHOTO_STORE);
-    const record = await idbRequest(store.get(id));
-    if (record) { record.syncStatus = "synced"; store.put(record); }
-    await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
-  },
+  }
 };
