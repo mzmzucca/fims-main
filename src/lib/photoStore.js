@@ -25,7 +25,6 @@ async function compressImage(file, maxWidth = 1280, quality = 0.7) {
         ctx.drawImage(img, 0, 0, width, height);
         
         canvas.toBlob((blob) => {
-          // Converter o nome do ficheiro para .jpg já que vamos comprimir em JPEG
           const newName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
           resolve(new File([blob], newName, { type: 'image/jpeg' }));
         }, 'image/jpeg', quality);
@@ -39,14 +38,10 @@ async function compressImage(file, maxWidth = 1280, quality = 0.7) {
 export const photoStore = {
   async add(inspectionId, entityId, file) {
     try {
-      // 1. Comprimir a imagem para evitar travamentos no upload
       const compressedFile = await compressImage(file);
-      
-      // 2. Criar um nome único para o ficheiro
       const fileExt = compressedFile.name.split('.').pop();
       const fileName = `${inspectionId}/${entityId}/${Date.now()}.${fileExt}`;
       
-      // 3. Fazer o upload para o Supabase Storage
       const { data, error } = await supabase.storage
         .from(BUCKET_NAME)
         .upload(fileName, compressedFile, {
@@ -59,7 +54,6 @@ export const photoStore = {
         throw error;
       }
 
-      // 4. Obter o link público da imagem
       const { data: urlData } = supabase.storage
         .from(BUCKET_NAME)
         .getPublicUrl(fileName);
@@ -71,19 +65,18 @@ export const photoStore = {
       return {
         id: fileName,
         url: urlData.publicUrl,
-        filename: file.name, // Manter o nome original do ficheiro para o utilizador
+        filename: file.name,
         inspection_id: inspectionId,
         entity_id: entityId
       };
     } catch (error) {
       console.error('[photoStore] Erro ao fazer upload:', error);
-      throw error; // Passa o erro para o componente tratar
+      throw error;
     }
   },
 
   async remove(photoId) {
     try {
-      // photoId neste caso é o caminho do ficheiro no Supabase
       const { error } = await supabase.storage
         .from(BUCKET_NAME)
         .remove([photoId]);
@@ -95,10 +88,9 @@ export const photoStore = {
 
   async listByInspection(inspectionId) {
     try {
-      // Listar todos os ficheiros dentro da pasta da inspeção
       const { data, error } = await supabase.storage
         .from(BUCKET_NAME)
-        .list(inspectionId, { recursive: true });
+        .list(inspectionId, { recursive: true, limit: 1000 });
 
       if (error || !data) return {};
 
@@ -106,11 +98,16 @@ export const photoStore = {
       
       data.forEach(file => {
         // Ignorar pastas vazias
-        if (!file.name.includes('.')) return; 
+        if (!file.name || !file.name.includes('.')) return; 
         
-        // O caminho completo é inspectionId/nomeDoFicheiro
-        const fullPath = `${inspectionId}/${file.name}`;
-        const entityId = file.name.split('/')[0]; // Extrair o entityId do nome do ficheiro
+        // O 'id' no objeto do Supabase costuma trazer o caminho completo: inspectionId/entityId/file.jpg
+        const fullPath = file.id || `${inspectionId}/${file.name}`;
+        const pathParts = fullPath.split('/');
+        
+        // Precisamos de pelo menos 3 partes: inspectionId/entityId/filename.jpg
+        if (pathParts.length < 3) return;
+        
+        const entityId = pathParts[1]; // Extrair o entityId corretamente
         
         if (!grouped[entityId]) grouped[entityId] = [];
         

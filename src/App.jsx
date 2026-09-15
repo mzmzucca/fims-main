@@ -27,6 +27,7 @@ import { CommsProvider, useComms } from "./context/CommsContext";
 import { getClientTemplate } from "./utils/excelTemplateImporter";
 import { authService } from "./services/authService";
 import { dataStore } from "./lib/dataStore";
+
 // Chaves para localStorage
 const STORAGE_KEYS = {
   CURRENT_USER: "fims_current_user",
@@ -39,10 +40,12 @@ const STORAGE_KEYS = {
   LOGS: "fims_logs",
   MESSAGES_DRAFT: "fims_messages_draft",
 };
+
 function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }) {
   const [locId, setLocId] = useState("");
   const [inspectorId, setInspectorId] = useState(currentUser.role === ROLES.INSPECTOR ? currentUser.id : "");
   const [selectedClient, setSelectedClient] = useState(null);
+
   const handleLocationChange = (e) => {
     const id = e.target.value;
     setLocId(id);
@@ -53,6 +56,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
       setSelectedClient(null);
     }
   };
+
   const handleCreate = () => {
     if (!locId) return;
     const loc = locations.find(l => l.id === Number(locId));
@@ -98,10 +102,12 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
       type: "inspection", 
       priority: "normal",
       template_id: template.clientId || "DEFAULT",
-      template_version: template.version || "1.0"
+      template_version: template.version || "1.0",
+      photosByItem: {} // Inicializar vazio
     };
     onCreate(insp);
   };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
@@ -155,6 +161,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     </div>
   );
 }
+
 function AppContent() {
   const { notify } = useComms();
   
@@ -175,11 +182,11 @@ function AppContent() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
   const [isInitialized, setIsInitialized] = useState(false);
+
   // --- CARREGAR DADOS DO INDEXEDDB + localStorage (uma vez) ---
   useEffect(() => {
     async function loadData() {
       try {
-        // 1. Load heavy data from IndexedDB
         const [savedInspections, savedUsers, savedLocations, savedLogs] = await Promise.all([
           dataStore.get(STORAGE_KEYS.INSPECTIONS),
           dataStore.get(STORAGE_KEYS.USERS),
@@ -189,16 +196,14 @@ function AppContent() {
         setInspections(savedInspections || genSeedInspections());
         setLocations(savedLocations || SEED_LOCATIONS);
         
-        // Buscar usuários reais da tabela fims_users no Supabase
         try {
           const { dataService } = await import('./services/dataService');
           const result = await dataService.fetchUsers();
           if (result.success && result.users.length > 0) {
             setUsers(result.users);
-            dataStore.set(STORAGE_KEYS.USERS, result.users); // Atualiza o cache local
+            dataStore.set(STORAGE_KEYS.USERS, result.users);
             console.log("[App] Usuários carregados do Supabase:", result.users.length);
           } else {
-            // Se não conseguir buscar do Supabase, usa o que tem no cache ou os seed
             setUsers(savedUsers || SEED_USERS);
           }
         } catch (e) {
@@ -206,35 +211,24 @@ function AppContent() {
           setUsers(savedUsers || SEED_USERS);
         }
         setAuditLogs(savedLogs || []);
-        // 2. Load light session data from localStorage
+        
         const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
         const savedPage = localStorage.getItem(STORAGE_KEYS.CURRENT_PAGE);
         const savedEditing = localStorage.getItem(STORAGE_KEYS.EDITING_INSPECTION);
         const savedViewing = localStorage.getItem(STORAGE_KEYS.VIEWING_INSPECTION);
+        
         if (savedUser) {
           try {
             const user = JSON.parse(savedUser);
             setCurrentUser(user);
-            if (savedPage && savedPage !== "login") {
-              setPage(savedPage);
-            }
-          } catch (e) {
-            localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-          }
+            if (savedPage && savedPage !== "login") setPage(savedPage);
+          } catch (e) { localStorage.removeItem(STORAGE_KEYS.CURRENT_USER); }
         }
-        if (savedEditing) {
-          try {
-            setEditingInspection(JSON.parse(savedEditing));
-          } catch (e) {}
-        }
-        if (savedViewing) {
-          try {
-            setViewingInspection(JSON.parse(savedViewing));
-          } catch (e) {}
-        }
+        if (savedEditing) try { setEditingInspection(JSON.parse(savedEditing)); } catch (e) {}
+        if (savedViewing) try { setViewingInspection(JSON.parse(savedViewing)); } catch (e) {}
+        
       } catch (err) {
         console.error("Error loading data:", err);
-        // fallback
         setInspections(genSeedInspections());
         setUsers(SEED_USERS);
         setLocations(SEED_LOCATIONS);
@@ -244,6 +238,7 @@ function AppContent() {
     }
     loadData();
   }, []);
+
   // ============================================
   // SINCRONIZAÇÃO COM SUPABASE - INSPEÇÕES
   // ============================================
@@ -251,33 +246,23 @@ function AppContent() {
     if (!isInitialized || !currentUser) return;
     let unsubscribed = false;
     let cleanupRealtime = null;
+
     async function syncInspections() {
       try {
         const { dataService } = await import('./services/dataService');
-        
         const result = await dataService.fetchInspections();
         
         if (unsubscribed || !result.success) return;
         
         console.log(`[App] Recebidas ${result.inspections.length} inspeções do Supabase`);
-        
-        // SIMPLIFICADO: Substituir dados locais pelos do Supabase
-        // O Supabase é a fonte de verdade
         setInspections(result.inspections);
-        
-        // Salvar no IndexedDB
         dataStore.set(STORAGE_KEYS.INSPECTIONS, result.inspections);
         
-        // Subscrever Realtime
         cleanupRealtime = dataService.subscribeToInspectionChanges((payload) => {
           if (unsubscribed) return;
-          
-          console.log('[App] Realtime:', payload.eventType, payload.new?.location_name);
-          
           if (payload.eventType === 'INSERT' && payload.new) {
             setInspections(prev => {
               if (prev.some(i => String(i.id) === String(payload.new.id))) return prev;
-              console.log('[App] Nova inspeção:', payload.new.location_name, '→', payload.new.inspector_name);
               const updated = [payload.new, ...prev];
               dataStore.set(STORAGE_KEYS.INSPECTIONS, updated);
               return updated;
@@ -294,91 +279,59 @@ function AppContent() {
         console.error('[App] Erro na sincronização:', error);
       }
     }
+
     syncInspections();
+
     return () => {
       unsubscribed = true;
       if (cleanupRealtime) cleanupRealtime();
     };
   }, [isInitialized, currentUser]);
+
   // --- SALVAR DADOS PESADOS NO INDEXEDDB ---
-  useEffect(() => {
-    if (!isInitialized) return;
-    dataStore.set(STORAGE_KEYS.INSPECTIONS, inspections);
-  }, [inspections, isInitialized]);
-  useEffect(() => {
-    if (!isInitialized) return;
-    dataStore.set(STORAGE_KEYS.USERS, users);
-  }, [users, isInitialized]);
-  useEffect(() => {
-    if (!isInitialized) return;
-    dataStore.set(STORAGE_KEYS.LOCATIONS, locations);
-  }, [locations, isInitialized]);
-  useEffect(() => {
-    if (!isInitialized) return;
-    dataStore.set(STORAGE_KEYS.LOGS, auditLogs);
-  }, [auditLogs, isInitialized]);
+  useEffect(() => { if (isInitialized) dataStore.set(STORAGE_KEYS.INSPECTIONS, inspections); }, [inspections, isInitialized]);
+  useEffect(() => { if (isInitialized) dataStore.set(STORAGE_KEYS.USERS, users); }, [users, isInitialized]);
+  useEffect(() => { if (isInitialized) dataStore.set(STORAGE_KEYS.LOCATIONS, locations); }, [locations, isInitialized]);
+  useEffect(() => { if (isInitialized) dataStore.set(STORAGE_KEYS.LOGS, auditLogs); }, [auditLogs, isInitialized]);
+
   // --- SALVAR DADOS LEVES NO localStorage ---
+  useEffect(() => { if (currentUser && page) localStorage.setItem(STORAGE_KEYS.CURRENT_PAGE, page); }, [page, currentUser]);
   useEffect(() => {
-    if (currentUser && page) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_PAGE, page);
-    }
-  }, [page, currentUser]);
-  useEffect(() => {
-    if (editingInspection) {
-      localStorage.setItem(STORAGE_KEYS.EDITING_INSPECTION, JSON.stringify(editingInspection));
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.EDITING_INSPECTION);
-    }
+    if (editingInspection) localStorage.setItem(STORAGE_KEYS.EDITING_INSPECTION, JSON.stringify(editingInspection));
+    else localStorage.removeItem(STORAGE_KEYS.EDITING_INSPECTION);
   }, [editingInspection]);
   useEffect(() => {
-    if (viewingInspection) {
-      localStorage.setItem(STORAGE_KEYS.VIEWING_INSPECTION, JSON.stringify(viewingInspection));
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
-    }
+    if (viewingInspection) localStorage.setItem(STORAGE_KEYS.VIEWING_INSPECTION, JSON.stringify(viewingInspection));
+    else localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
   }, [viewingInspection]);
+
   // --- FUNÇÕES ---
   const alertCount = inspections.filter(i => i.alert_level === "critical" && i.score_pct !== null && !i.resolved).length;
   
   const topBarTitles = {
-    dashboard: "Dashboard", 
-    inspections: "Inspeções", 
-    alerts: "Alertas", 
-    reports: "Relatórios",
-    users: "Utilizadores", 
-    locations: "Localizações", 
-    templates: "Templates",
-    audit: "Auditoria", 
-    settings: "Configurações", 
-    monthly_report: "Relatório Mensal",
-    schedule: "Operations Calendar", 
-    field_map: "Mapa de Campo", 
-    team: "Equipa (KPIs)", 
-    messages: "Mensagens", 
-    report_center: "Centro de Relatórios"
+    dashboard: "Dashboard", inspections: "Inspeções", alerts: "Alertas", reports: "Relatórios",
+    users: "Utilizadores", locations: "Localizações", templates: "Templates", audit: "Auditoria", 
+    settings: "Configurações", monthly_report: "Relatório Mensal", schedule: "Operations Calendar", 
+    field_map: "Mapa de Campo", team: "Equipa (KPIs)", messages: "Mensagens", report_center: "Centro de Relatórios"
   };
+
   const addAuditLog = (user, action, type, detail) => {
     setAuditLogs(prev => [{ id: genId(), timestamp: new Date().toISOString(), user: user.name, action, type, detail }, ...prev]);
   };
+
   const handleLogin = (user) => {
     setCurrentUser(user);
     localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
-    // Restaurar página anterior ou ir para dashboard
     const savedPage = localStorage.getItem(STORAGE_KEYS.CURRENT_PAGE);
-    // Se for página de login ou vazia, vai para dashboard
-    if (savedPage && savedPage !== "login" && savedPage !== "") {
-      setPage(savedPage);
-    } else {
-      setPage("dashboard");
-    }
+    setPage(savedPage && savedPage !== "login" && savedPage !== "" ? savedPage : "dashboard");
     addAuditLog(user, "Login", "login", "Entrou no sistema");
   };
+
   const handleLogout = async () => {
     if (currentUser) {
       await authService.logout(currentUser.id);
       addAuditLog(currentUser, "Logout", "logout", "Saiu do sistema");
     }
-    // Limpar todos os dados de sessão
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     localStorage.removeItem(STORAGE_KEYS.CURRENT_PAGE);
     localStorage.removeItem(STORAGE_KEYS.EDITING_INSPECTION);
@@ -388,6 +341,7 @@ function AppContent() {
     setEditingInspection(null);
     setViewingInspection(null);
   };
+
   const handleNavigate = (p) => {
     setPage(p);
     setViewingInspection(null);
@@ -404,9 +358,7 @@ function AppContent() {
     setPage("inspections");
   };
   
-  // ================================================================
-  // FUNÇÃO handleStartInspection SUBSTITUÍDA
-  // ================================================================
+  // FUNÇÃO: INICIAR INSPEÇÃO
   const handleStartInspection = async (insp) => {
     let updated = { ...insp };
     let needsSave = false;
@@ -419,24 +371,8 @@ function AppContent() {
     if (!updated.items || updated.items.length === 0) {
       const template = getClientTemplate(updated.location_name);
       const templateSections = template.sections || [];
-      
-      updated.items = templateSections.flatMap(s => 
-        (s.items || []).map(item => ({ 
-          ...item, 
-          section_id: s.id, 
-          score: null, 
-          comment: "", 
-          photos: [] 
-        }))
-      );
-      
-      updated.sections = templateSections.map(s => ({ 
-        id: s.id, 
-        title: s.title || s.name,
-        observation: "", 
-        photos: [] 
-      }));
-      
+      updated.items = templateSections.flatMap(s => (s.items || []).map(item => ({ ...item, section_id: s.id, score: null, comment: "", photos: [] })));
+      updated.sections = templateSections.map(s => ({ id: s.id, title: s.title || s.name, observation: "", photos: [] }));
       updated.template_id = template.clientId || "DEFAULT";
       updated.template_version = template.version || "1.0";
       needsSave = true;
@@ -447,51 +383,38 @@ function AppContent() {
     setViewingInspection(null);
     localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
     setPage("inspections");
-    // SALVAR NO SUPABASE (se mudou para in_progress ou se gerou items)
+
     if (needsSave) {
       try {
         const { dataService } = await import('./services/dataService');
         await dataService.saveInspection(updated);
-      } catch (error) {
-        console.error("Erro ao iniciar inspeção no Supabase:", error);
-      }
+      } catch (error) { console.error("Erro ao iniciar inspeção no Supabase:", error); }
     }
   };
   
-  // ================================================================
-  // FUNÇÃO handleSaveInspection SUBSTITUÍDA
-  // ================================================================
+  // FUNÇÃO: GUARDAR RASCUNHO
   const handleSaveInspection = async (updated) => {
-    // Atualiza UI
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     setEditingInspection(updated);
-    
-    // SALVAR NO SUPABASE
     try {
       const { dataService } = await import('./services/dataService');
       await dataService.saveInspection(updated);
-      console.log("[App] Rascunho salvo no Supabase com sucesso.");
-    } catch (error) {
-      console.error("Erro ao salvar rascunho no Supabase:", error);
-    }
+      console.log("[App] Rascunho e fotos salvos no Supabase.");
+    } catch (error) { console.error("Erro ao salvar rascunho no Supabase:", error); }
   };
   
-  // ================================================================
-  // FUNÇÃO handleSubmitInspection SUBSTITUÍDA
-  // ================================================================
+  // FUNÇÃO: SUBMETER INSPEÇÃO
   const handleSubmitInspection = async (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     setEditingInspection(null);
     localStorage.removeItem(STORAGE_KEYS.EDITING_INSPECTION);
     setPage("inspections");
     
-    // SALVAR NO SUPABASE
     try {
       const { dataService } = await import('./services/dataService');
       await dataService.saveInspection(updated);
-    } catch (error) {
-      console.error("Erro ao submeter inspeção no Supabase:", error);
-    }
+    } catch (error) { console.error("Erro ao submeter no Supabase:", error); }
+
     addAuditLog(currentUser, "Notificação Enviada", "notification", `Email e WhatsApp enviados para o Supervisor (${updated.supervisor_name}) sobre a inspeção em ${updated.location_name}`);
     notify(3, `Nova inspeção submetida por ${currentUser.name} para ${updated.location_name}.`, "inspections");
     
@@ -505,92 +428,92 @@ function AppContent() {
     }
   };
   
-  // ================================================================
-  // FUNÇÃO handleAcceptTask SUBSTITUÍDA
-  // ================================================================
+  // FUNÇÃO: ACEITAR TAREFA
   const handleAcceptTask = async (insp) => {
-    // Atualiza UI imediatamente
     const updatedInsp = { ...insp, accepted: true, status: "pending" };
     setInspections(prev => prev.map(i => i.id === insp.id ? updatedInsp : i));
     addAuditLog(currentUser, "Tarefa Aceite", "schedule", `Aceitou a tarefa para ${insp.location_name}`);
     notify(3, `${currentUser.name} aceitou a tarefa para ${insp.location_name}.`, "schedule");
-    
-    // SALVAR NO SUPABASE
     try {
       const { dataService } = await import('./services/dataService');
       await dataService.saveInspection(updatedInsp);
-    } catch (error) {
-      console.error("Erro ao salvar aceitação no Supabase:", error);
-      alert("Erro ao sincronizar a aceitação. Verifique sua conexão.");
-    }
+    } catch (error) { console.error("Erro ao salvar aceitação no Supabase:", error); }
   };
   
-  const handleDeclineTask = (insp) => {
+  // FUNÇÃO: RECUSAR TAREFA
+  const handleDeclineTask = async (insp) => {
     const reason = prompt("Motivo da recusa:", "");
     if (reason === null) return;
-    setInspections(prev => prev.map(i => i.id === insp.id ? { ...i, accepted: false, status: "rejected", decline_reason: reason } : i));
+    const updatedInsp = { ...insp, accepted: false, status: "rejected", decline_reason: reason };
+    setInspections(prev => prev.map(i => i.id === insp.id ? updatedInsp : i));
     addAuditLog(currentUser, "Tarefa Recusada", "schedule", `Recusou a tarefa para ${insp.location_name}. Motivo: ${reason}`);
     notify(3, `⚠️ ${currentUser.name} RECUSOU a tarefa para ${insp.location_name}. Motivo: ${reason}`, "schedule");
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(updatedInsp);
+    } catch (error) { console.error("Erro ao salvar recusa no Supabase:", error); }
   };
-  const handleRequestLeave = (user) => {
+
+  const handleRequestLeave = async (user) => {
     const date = prompt("Data da folga (AAAA-MM-DD):", new Date().toISOString().split("T")[0]);
     if (!date) return;
     const leaveTask = { id: genId(), inspector_id: user.id, inspector_name: user.name, date, type: "leave", status: "leave" };
     setInspections(prev => [leaveTask, ...prev]);
     addAuditLog(user, "Folga Pedida", "schedule", `Pediu folga para ${date}`);
     notify(3, `${user.name} pediu folga para ${date}.`, "schedule");
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(leaveTask);
+    } catch (error) { console.error("Erro ao salvar folga no Supabase:", error); }
     alert("Folga registada.");
   };
-  // FUNÇÃO ADICIONADA PARA EXCLUIR INSPEÇÃO
-  const handleDelete = (id) => {
+  
+  // FUNÇÃO: EXCLUIR INSPEÇÃO
+  const handleDelete = async (id) => {
     setInspections(prev => prev.filter(i => i.id !== id));
     addAuditLog(currentUser, "Excluir", "inspection", `Excluiu a inspeção ID: ${id}`);
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.deleteInspection(id);
+    } catch (error) { console.error("Erro ao exuir no Supabase:", error); }
   };
   
+  // FUNÇÃO: CRIAR INSPEÇÃO
   const handleCreateInspection = async (insp) => {
     setInspections(prev => [insp, ...prev]);
     setShowNewModal(false);
     setEditingInspection(insp);
     setPage("inspections");
-    // SALVAR NO SUPABASE
     try {
       const { dataService } = await import('./services/dataService');
       await dataService.saveInspection(insp);
-    } catch (error) {
-      console.error("Erro ao salvar nova inspeção no Supabase:", error);
-    }
+    } catch (error) { console.error("Erro ao salvar nova inspeção no Supabase:", error); }
   };
   
-  const handleUpdateInspection = (updated) => {
+  // FUNÇÃO: ATUALIZAR INSPEÇÃO (Aprovar/Rejeitar do Supervisor)
+  const handleUpdateInspection = async (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     if (viewingInspection) setViewingInspection(updated);
     if (updated.status === "needs_corrections") notify(updated.inspector_id, `A inspeção de ${updated.location_name} foi rejeitada. Veja as correções necessárias.`, "inspections");
     if (updated.status === "reviewed") notify(2, `Uma inspeção foi aprovada por ${currentUser.name}. Pronta para envio ao cliente.`, "inspections");
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(updated);
+    } catch (error) { console.error("Erro ao salvar atualização no Supabase:", error); }
   };
+
+  // FUNÇÃO: CRIAR DESPACHO (Schedule)
   const handleCreateSchedule = async (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
       const template = getClientTemplate(task.location_name);
       const templateSections = template.sections || [];
-      
       return {
         ...task,
-        items: templateSections.flatMap(s => 
-          (s.items || []).map(item => ({ 
-            ...item, 
-            section_id: s.id, 
-            score: null, 
-            comment: "", 
-            photos: [] 
-          }))
-        ),
-        sections: templateSections.map(s => ({ 
-          id: s.id, 
-          title: s.title || s.name,
-          observation: "", 
-          photos: [] 
-        })),
+        items: templateSections.flatMap(s => (s.items || []).map(item => ({ ...item, section_id: s.id, score: null, comment: "", photos: [] }))),
+        sections: templateSections.map(s => ({ id: s.id, title: s.title || s.name, observation: "", photos: [] })),
         template_id: template.clientId || "DEFAULT",
-        template_version: template.version || "1.0"
+        template_version: template.version || "1.0",
+        photosByItem: {}
       };
     });
     
@@ -598,66 +521,69 @@ function AppContent() {
     setShowScheduleModal(false);
     addAuditLog(currentUser, "Despacho Criado", "schedule", `Agendou ${tasksWithTemplates.length} tarefa(s)`);
     
-    // SALVAR NO SUPABASE
     try {
       const { dataService } = await import('./services/dataService');
       for (const task of tasksWithTemplates) {
         await dataService.saveInspection(task);
         if(task.inspector_id) notify(task.inspector_id, `Nova tarefa agendada para ${task.date} no local ${task.location_name}.`, "schedule");
       }
-    } catch (error) {
-      console.error("Erro ao salvar despacho no Supabase:", error);
-      alert("Erro ao salvar o agendamento no banco de dados.");
-    }
+    } catch (error) { console.error("Erro ao salvar despacho no Supabase:", error); }
   };
-  const handleBulkSchedule = (tasks) => {
+
+  // FUNÇÃO: DESPACHO MÚLTIPLO
+  const handleBulkSchedule = async (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
       const template = getClientTemplate(task.location_name);
       const templateSections = template.sections || [];
-      
       return {
         ...task,
-        items: templateSections.flatMap(s => 
-          (s.items || []).map(item => ({ 
-            ...item, 
-            section_id: s.id, 
-            score: null, 
-            comment: "", 
-            photos: [] 
-          }))
-        ),
-        sections: templateSections.map(s => ({ 
-          id: s.id, 
-          title: s.title || s.name,
-          observation: "", 
-          photos: [] 
-        })),
+        items: templateSections.flatMap(s => (s.items || []).map(item => ({ ...item, section_id: s.id, score: null, comment: "", photos: [] }))),
+        sections: templateSections.map(s => ({ id: s.id, title: s.title || s.name, observation: "", photos: [] })),
         template_id: template.clientId || "DEFAULT",
-        template_version: template.version || "1.0"
+        template_version: template.version || "1.0",
+        photosByItem: {}
       };
     });
     
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     setShowBulkModal(false);
     addAuditLog(currentUser, "Despacho Múltiplo Criado", "schedule", `Agendou ${tasksWithTemplates.length} tarefas via bulk scheduling.`);
-    tasksWithTemplates.forEach(t => {
-      if(t.inspector_id) notify(t.inspector_id, `Nova tarefa agendada para ${t.date} no local ${t.location_name}.`, "schedule");
-    });
+    
+    try {
+      const { dataService } = await import('./services/dataService');
+      for (const task of tasksWithTemplates) {
+        await dataService.saveInspection(task);
+        if(task.inspector_id) notify(task.inspector_id, `Nova tarefa agendada para ${task.date} no local ${task.location_name}.`, "schedule");
+      }
+    } catch (error) { console.error("Erro ao salvar despacho múltiplo no Supabase:", error); }
   };
-  const handleDragUpdate = (updated, notifyInspector = true) => {
+
+  // FUNÇÃO: MOVER TAREFA (Drag/Drop)
+  const handleDragUpdate = async (updated, notifyInspector = true) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     if (notifyInspector && updated.inspector_id) {
       notify(updated.inspector_id, `Tarefa atualizada: ${updated.location_name} movida para ${updated.date}.`, "schedule");
     }
     addAuditLog(currentUser, "Tarefa Movida (Drag/Drop)", "schedule", `Moveu ${updated.location_name} para ${updated.date} (${updated.inspector_name || "Unassigned"})`);
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(updated);
+    } catch (error) { console.error("Erro ao salvar move no Supabase:", error); }
   };
-  const handleConfirmReschedule = (updated, notifyClient, notifyInspector) => {
+
+  // FUNÇÃO: REAGENDAR
+  const handleConfirmReschedule = async (updated, notifyClient, notifyInspector) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     addAuditLog(currentUser, "Inspeção Reagendada", "schedule", `Reagendou ${updated.location_name} para ${updated.date}. Motivo: ${updated.reschedule_reason}`);
     if (notifyInspector && updated.inspector_id) notify(updated.inspector_id, `Inspeção reagendada para ${updated.date} às ${updated.start_time}.`, "schedule");
     if (notifyClient) alert("Client notified (Simulated).");
     setReschedulingTask(null);
+    try {
+      const { dataService } = await import('./services/dataService');
+      await dataService.saveInspection(updated);
+    } catch (error) { console.error("Erro ao salvar reagendamento no Supabase:", error); }
   };
+
   // --- RENDER ---
   if (!isInitialized) {
     return (
@@ -666,14 +592,13 @@ function AppContent() {
       </div>
     );
   }
-  // Se não tem usuário logado, mostra Login
-  if (!currentUser) {
-    return <Login onLogin={handleLogin} />;
-  }
-  // Determinar o título da página
+
+  if (!currentUser) return <Login onLogin={handleLogin} />;
+
   let pageTitle = topBarTitles[page] || "FIMS";
   if (editingInspection) pageTitle = editingInspection.location_name;
   else if (viewingInspection) pageTitle = viewingInspection.location_name;
+
   return (
     <div className="fims-app">
       <Sidebar 
@@ -832,6 +757,7 @@ function AppContent() {
     </div>
   );
 }
+
 export default function App() {
   return (
     <LangProvider>
