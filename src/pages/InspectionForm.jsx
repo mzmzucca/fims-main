@@ -173,10 +173,19 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   const setComment = (itemId, comment) => setItems(prev => prev.map(i => i.id === itemId ? { ...i, comment } : i));
   const setSectionObservation = (secId, text) => setSections(prev => prev.map(s => s.id === secId ? { ...s, observation: text } : s));
 
+  // FUNÇÃO ADD PHOTO COM TRATAMENTO DE ERROS
   const addPhoto = async (entityId, file) => {
-    const meta = await photoStore.add(inspection.id, entityId, file);
-   // meta.url = URL.createObjectURL(file);
-    setPhotosByItem(prev => ({ ...prev, [entityId]: [...(prev[entityId] || []), meta] }));
+    try {
+      const meta = await photoStore.add(inspection.id, entityId, file);
+      if (meta && meta.url) {
+        setPhotosByItem(prev => ({ ...prev, [entityId]: [...(prev[entityId] || []), meta] }));
+      } else {
+        alert("Erro ao carregar a foto. Tente novamente.");
+      }
+    } catch (error) {
+      console.error("[InspectionForm] Falha no upload da foto:", error);
+      alert("Erro ao enviar a foto. Verifique se as permissões do Supabase Storage estão configuradas (RLS Policies).");
+    }
   };
 
   const removePhoto = async (entityId, photo) => {
