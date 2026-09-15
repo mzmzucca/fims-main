@@ -29,8 +29,14 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
     const loadPhotos = async () => {
       setLoading(true);
       try {
-        const grouped = await photoStore.listByInspection(inspection.id);
-        setPhotosByItem(grouped);
+        // LER DIRETAMENTE DO JSON DA INSPEÇÃO (MUITO MAIS RÁPIDO)
+        if (inspection.photosByItem && Object.keys(inspection.photosByItem).length > 0) {
+          setPhotosByItem(inspection.photosByItem);
+        } else {
+          // Fallback para inspeções antigas que não têm fotos no JSON
+          const grouped = await photoStore.listByInspection(inspection.id);
+          setPhotosByItem(grouped);
+        }
       } catch (e) {
         console.error("Erro ao carregar fotos:", e);
       } finally {
@@ -38,7 +44,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       }
     };
     loadPhotos();
-  }, [inspection.id]);
+  }, [inspection.id, inspection.photosByItem]);
 
   // Calcular estatísticas
   const totalItems = inspection.items?.length || 0;
@@ -66,21 +72,16 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
   const defectHeatmap = (() => {
     if (!allInspections || allInspections.length === 0) return [];
     
-    // Filtrar inspeções do mesmo cliente (incluindo a atual)
     const clientInsps = allInspections.filter(i => 
       i.location_id === inspection.location_id && 
       i.score_pct !== null
     );
     
-    // Se não houver outras inspeções do cliente, usar apenas a atual
     const inspsToCheck = clientInsps.length > 0 ? clientInsps : [inspection];
-    
-    // Mapa para contar defeitos
     const defectMap = {};
     
     inspsToCheck.forEach(insp => {
       (insp.items || []).forEach(item => {
-        // Verificar se o item tem score e é crítico (<= 2)
         if (item.score !== null && item.score <= 2) {
           const key = item.label || item.text || "Item sem nome";
           if (!defectMap[key]) {
@@ -92,7 +93,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
             };
           }
           defectMap[key].count++;
-          // Atualizar com o último score e data
           defectMap[key].lastScore = item.score;
           if (insp.date && insp.date > defectMap[key].lastDate) {
             defectMap[key].lastDate = insp.date;
@@ -101,7 +101,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       });
     });
     
-    // Converter para array e ordenar por frequência
     const results = Object.keys(defectMap)
       .map(key => ({ 
         text: key, 
@@ -112,12 +111,8 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       }))
       .sort((a, b) => b.count - a.count);
     
-    // Mostrar top 10 ou todos se menos de 10
     return results.slice(0, 10);
   })();
-  // ============================================================
-  // FIM DO HEATMAP CORRIGIDO
-  // ============================================================
 
   const handleApprove = () => { 
     onUpdate({ ...inspection, status: "reviewed" }); 
@@ -141,7 +136,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
     setQcItem(null);
   };
 
-  // Funções de exportação (PDF e Word)
+  // Funções de exportação (PDF E WORD COM FOTOS)
   const handleDownloadPDF = async () => {
     try {
       const doc = new jsPDF();
@@ -193,7 +188,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       }
       y += 6;
 
-      // Sections with Photos
+      // Sections with Items
       for (const section of TEMPLATE_SECTIONS) {
         if (y > 250) { doc.addPage(); y = 20; }
         doc.setFillColor(30, 42, 58); 
@@ -234,6 +229,55 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           y += itemText.length * 5 + 4;
         }
         y += 6;
+      }
+
+      // ANEXO DE FOTOS NO PDF
+      const allPhotosToPrint = [];
+      for (const section of TEMPLATE_SECTIONS) {
+        const secPhotos = photosByItem[section.id] || [];
+        const sItems = inspection.items?.filter(i => i.section_id === section.id) || [];
+        const itemPhotos = sItems.flatMap(i => photosByItem[i.id] || []);
+        const combined = [...secPhotos, ...itemPhotos];
+        if (combined.length > 0) {
+          allPhotosToPrint.push({ sectionName: section.name || section.title || "Seção", photos: combined });
+        }
+      }
+
+      if (allPhotosToPrint.length > 0) {
+        doc.addPage();
+        let py = 20;
+        doc.setFontSize(13); doc.setTextColor(30, 42, 58); doc.setFont("helvetica", "bold");
+        doc.text("Anexo: Evidências Fotográficas", 14, py); py += 10;
+        
+        for (const group of allPhotosToPrint) {
+          if (py > 250) { doc.addPage(); py = 20; }
+          doc.setFontSize(11); doc.setTextColor(80, 80, 80);
+          doc.text(group.sectionName, 14, py); py += 6;
+          
+          let imgX = 14;
+          for (const photo of group.photos) {
+            try {
+              const response = await fetch(photo.url);
+              const blob = await response.blob();
+              const reader = new FileReader();
+              const dataUrl = await new Promise((resolve) => {
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+              });
+              
+              if (py > 250) { doc.addPage(); py = 20; }
+              doc.addImage(dataUrl, 'JPEG', imgX, py, 40, 30);
+              imgX += 44;
+              if (imgX > 170) {
+                imgX = 14;
+                py += 34;
+              }
+            } catch(e) {
+              console.warn("Erro ao adicionar imagem ao PDF:", e);
+            }
+          }
+          if (imgX > 14) py += 40;
+        }
       }
 
       // Signatures
@@ -281,6 +325,8 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
         .cmt { color: #666; font-size: 10pt; margin-left: 15px; }
         .qc { color: #A32D2D; font-size: 10pt; margin-left: 15px; font-weight: bold; }
         .ai-box { background: #E6F1FB; padding: 10px; margin-bottom: 20px; border-left: 4px solid #378ADD; }
+        .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+        .photo-grid img { width: 100%; height: 150px; object-fit: cover; border: 1px solid #ddd; }
       </style>
       </head><body>`;
       
@@ -308,6 +354,19 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           if (item.qc_comment) html += `<div class="qc">⚠ QC: ${item.qc_comment}</div>`;
           html += `</div>`;
         });
+        
+        // Adicionar fotos no Word
+        const secPhotos = photosByItem[section.id] || [];
+        const itemPhotos = sItems.flatMap(i => photosByItem[i.id] || []);
+        const allPhotos = [...secPhotos, ...itemPhotos];
+        
+        if (allPhotos.length > 0) {
+          html += `<div class="photo-grid">`;
+          allPhotos.forEach(photo => {
+            html += `<img src="${photo.url}" alt="Evidência" />`;
+          });
+          html += `</div>`;
+        }
       });
 
       // Signatures
@@ -893,9 +952,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           )}
         </div>
       )}
-      {/* ============================================================ */}
-      {/* FIM DO HEATMAP CORRIGIDO */}
-      {/* ============================================================ */}
 
       {/* Lightbox */}
       {lightboxUrl && (

@@ -135,17 +135,17 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     }
   }, [sections]);
 
-  // Salvar draft
+  // Salvar draft (INCLUI FOTOS)
   useEffect(() => {
     if (items.length > 0 || sections.length > 0) {
-      const draftData = { items, sections, notes, clientMgrName, inspectorSig, clientSig };
+      const draftData = { items, sections, notes, clientMgrName, inspectorSig, clientSig, photosByItem };
       try {
         localStorage.setItem(draftKey, JSON.stringify(draftData));
       } catch (e) {
         console.warn('[InspectionForm] Erro ao salvar draft:', e);
       }
     }
-  }, [items, sections, notes, clientMgrName, inspectorSig, clientSig, draftKey]);
+  }, [items, sections, notes, clientMgrName, inspectorSig, clientSig, photosByItem, draftKey]);
 
   // GPS
   useEffect(() => {
@@ -158,15 +158,36 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
     }
   }, [gpsCoords]);
 
-  // Fotos
+  // Fotos (Carregar do JSON, Draft ou Supabase Storage)
   useEffect(() => {
     let cancelled = false;
+    
+    // 1. Verificar se a inspeção (vinda do Supabase) já tem fotos guardadas
+    if (inspection.photosByItem && Object.keys(inspection.photosByItem).length > 0) {
+      setPhotosByItem(inspection.photosByItem);
+      return;
+    }
+
+    // 2. Verificar rascunho local
+    try {
+      const savedDraft = localStorage.getItem(draftKey);
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft);
+        if (parsed.photosByItem && Object.keys(parsed.photosByItem).length > 0) {
+          setPhotosByItem(parsed.photosByItem);
+          return;
+        }
+      }
+    } catch (e) {}
+
+    // 3. Fallback: Buscar do Supabase Storage (para inspeções antigas)
     photoStore.listByInspection(inspection.id).then(grouped => {
       if (cancelled) return;
       setPhotosByItem(grouped);
     }).catch(() => {});
+    
     return () => { cancelled = true; };
-  }, [inspection.id]);
+  }, [inspection.id, inspection.photosByItem, draftKey]);
 
   // Funções de atualização
   const setScore = (itemId, score) => setItems(prev => prev.map(i => i.id === itemId ? { ...i, score } : i));
@@ -215,6 +236,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
       sections, 
       notes, 
       status: "in_progress", 
+      photosByItem, // ADICIONADO AQUI
       client_mgr_name: clientMgrName, 
       inspector_sig: inspectorSig, 
       client_sig: clientSig, 
@@ -281,6 +303,7 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
       status: "submitted", 
       score_pct: pct, 
       alert_level: alertLevel, 
+      photosByItem, // ADICIONADO AQUI
       client_mgr_name: clientMgrName, 
       inspector_sig: inspectorSig, 
       client_sig: clientSig, 
