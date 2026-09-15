@@ -103,7 +103,7 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
       priority: "normal",
       template_id: template.clientId || "DEFAULT",
       template_version: template.version || "1.0",
-      photosByItem: {} // Inicializar vazio
+      photosByItem: {}
     };
     onCreate(insp);
   };
@@ -430,13 +430,15 @@ function AppContent() {
   
   // FUNÇÃO: ACEITAR TAREFA
   const handleAcceptTask = async (insp) => {
-    const updatedInsp = { ...insp, accepted: true, status: "pending" };
-    setInspections(prev => prev.map(i => i.id === insp.id ? updatedInsp : i));
+    const existing = inspections.find(i => i.id === insp.id) || {};
+    const merged = { ...existing, accepted: true, status: "pending" };
+    
+    setInspections(prev => prev.map(i => i.id === insp.id ? merged : i));
     addAuditLog(currentUser, "Tarefa Aceite", "schedule", `Aceitou a tarefa para ${insp.location_name}`);
     notify(3, `${currentUser.name} aceitou a tarefa para ${insp.location_name}.`, "schedule");
     try {
       const { dataService } = await import('./services/dataService');
-      await dataService.saveInspection(updatedInsp);
+      await dataService.saveInspection(merged);
     } catch (error) { console.error("Erro ao salvar aceitação no Supabase:", error); }
   };
   
@@ -444,13 +446,16 @@ function AppContent() {
   const handleDeclineTask = async (insp) => {
     const reason = prompt("Motivo da recusa:", "");
     if (reason === null) return;
-    const updatedInsp = { ...insp, accepted: false, status: "rejected", decline_reason: reason };
-    setInspections(prev => prev.map(i => i.id === insp.id ? updatedInsp : i));
+    
+    const existing = inspections.find(i => i.id === insp.id) || {};
+    const merged = { ...existing, accepted: false, status: "rejected", decline_reason: reason };
+    
+    setInspections(prev => prev.map(i => i.id === insp.id ? merged : i));
     addAuditLog(currentUser, "Tarefa Recusada", "schedule", `Recusou a tarefa para ${insp.location_name}. Motivo: ${reason}`);
     notify(3, `⚠️ ${currentUser.name} RECUSOU a tarefa para ${insp.location_name}. Motivo: ${reason}`, "schedule");
     try {
       const { dataService } = await import('./services/dataService');
-      await dataService.saveInspection(updatedInsp);
+      await dataService.saveInspection(merged);
     } catch (error) { console.error("Erro ao salvar recusa no Supabase:", error); }
   };
 
@@ -492,13 +497,17 @@ function AppContent() {
   
   // FUNÇÃO: ATUALIZAR INSPEÇÃO (Aprovar/Rejeitar do Supervisor)
   const handleUpdateInspection = async (updated) => {
-    setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
-    if (viewingInspection) setViewingInspection(updated);
-    if (updated.status === "needs_corrections") notify(updated.inspector_id, `A inspeção de ${updated.location_name} foi rejeitada. Veja as correções necessárias.`, "inspections");
-    if (updated.status === "reviewed") notify(2, `Uma inspeção foi aprovada por ${currentUser.name}. Pronta para envio ao cliente.`, "inspections");
+    const existing = inspections.find(i => i.id === updated.id) || {};
+    const merged = { ...existing, ...updated };
+    
+    setInspections(prev => prev.map(i => i.id === merged.id ? merged : i));
+    if (viewingInspection) setViewingInspection(merged);
+    
+    if (merged.status === "needs_corrections") notify(merged.inspector_id, `A inspeção de ${merged.location_name} foi rejeitada. Veja as correções necessárias.`, "inspections");
+    if (merged.status === "reviewed") notify(2, `Uma inspeção foi aprovada por ${currentUser.name}. Pronta para envio ao cliente.`, "inspections");
     try {
       const { dataService } = await import('./services/dataService');
-      await dataService.saveInspection(updated);
+      await dataService.saveInspection(merged);
     } catch (error) { console.error("Erro ao salvar atualização no Supabase:", error); }
   };
 
@@ -560,27 +569,33 @@ function AppContent() {
 
   // FUNÇÃO: MOVER TAREFA (Drag/Drop)
   const handleDragUpdate = async (updated, notifyInspector = true) => {
-    setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
-    if (notifyInspector && updated.inspector_id) {
-      notify(updated.inspector_id, `Tarefa atualizada: ${updated.location_name} movida para ${updated.date}.`, "schedule");
+    const existing = inspections.find(i => i.id === updated.id) || {};
+    const merged = { ...existing, ...updated };
+    
+    setInspections(prev => prev.map(i => i.id === merged.id ? merged : i));
+    if (notifyInspector && merged.inspector_id) {
+      notify(merged.inspector_id, `Tarefa atualizada: ${merged.location_name} movida para ${merged.date}.`, "schedule");
     }
-    addAuditLog(currentUser, "Tarefa Movida (Drag/Drop)", "schedule", `Moveu ${updated.location_name} para ${updated.date} (${updated.inspector_name || "Unassigned"})`);
+    addAuditLog(currentUser, "Tarefa Movida (Drag/Drop)", "schedule", `Moveu ${merged.location_name} para ${merged.date} (${merged.inspector_name || "Unassigned"})`);
     try {
       const { dataService } = await import('./services/dataService');
-      await dataService.saveInspection(updated);
+      await dataService.saveInspection(merged);
     } catch (error) { console.error("Erro ao salvar move no Supabase:", error); }
   };
 
   // FUNÇÃO: REAGENDAR
   const handleConfirmReschedule = async (updated, notifyClient, notifyInspector) => {
-    setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
-    addAuditLog(currentUser, "Inspeção Reagendada", "schedule", `Reagendou ${updated.location_name} para ${updated.date}. Motivo: ${updated.reschedule_reason}`);
-    if (notifyInspector && updated.inspector_id) notify(updated.inspector_id, `Inspeção reagendada para ${updated.date} às ${updated.start_time}.`, "schedule");
+    const existing = inspections.find(i => i.id === updated.id) || {};
+    const merged = { ...existing, ...updated };
+    
+    setInspections(prev => prev.map(i => i.id === merged.id ? merged : i));
+    addAuditLog(currentUser, "Inspeção Reagendada", "schedule", `Reagendou ${merged.location_name} para ${merged.date}. Motivo: ${merged.reschedule_reason}`);
+    if (notifyInspector && merged.inspector_id) notify(merged.inspector_id, `Inspeção reagendada para ${merged.date} às ${merged.start_time}.`, "schedule");
     if (notifyClient) alert("Client notified (Simulated).");
     setReschedulingTask(null);
     try {
       const { dataService } = await import('./services/dataService');
-      await dataService.saveInspection(updated);
+      await dataService.saveInspection(merged);
     } catch (error) { console.error("Erro ao salvar reagendamento no Supabase:", error); }
   };
 
