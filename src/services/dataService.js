@@ -1,5 +1,6 @@
 // src/services/dataService.js
 import { supabase } from '../lib/supabase';
+
 export const dataService = {
   async fetchInspections() {
     try {
@@ -13,7 +14,6 @@ export const dataService = {
         return { success: false, inspections: [] }; 
       }
       
-      // CORRIGIDO: Incluir colunas do nível da tabela, não apenas o JSONB data
       const inspections = (data || []).map(row => {
         const dataContent = row.data || {};
         return {
@@ -28,6 +28,10 @@ export const dataService = {
           location_id: row.location_id || dataContent.location_id,
           alert_level: row.alert_level || dataContent.alert_level,
           type: row.type || dataContent.type,
+          // GARANTIR QUE DADOS PESADOS VÊM DO JSONB
+          items: dataContent.items || [],
+          sections: dataContent.sections || [],
+          photosByItem: dataContent.photosByItem || {}, 
           // Metadados
           updated_at: row.updated_at,
           created_at: row.created_at
@@ -61,13 +65,12 @@ export const dataService = {
         return { success: false, users: [] }; 
       }
       
-      // Mapear os dados para garantir que tenham a estrutura que o frontend espera
       const users = (data || []).map(row => ({
         id: row.id,
         name: row.name || 'Sem Nome',
         email: row.email || '',
         role: row.role || 'inspector',
-        active: row.active !== false // Se for nulo, assume true
+        active: row.active !== false
       }));
       
       console.log(`[dataService] Fetched ${users.length} users from fims_users`);
@@ -82,8 +85,8 @@ export const dataService = {
     try {
       const row = { 
         id: String(inspection.id), 
-        data: inspection,  // Guardar tudo no JSONB
-        inspector_id: String(inspection.inspector_id || ''),  // Também na coluna
+        data: inspection,  // Guardar tudo no JSONB (inclui items, sections e photosByItem)
+        inspector_id: String(inspection.inspector_id || ''),
         inspector_name: inspection.inspector_name || null,
         status: inspection.status || 'pending',
         date: inspection.date || null,
@@ -105,6 +108,7 @@ export const dataService = {
       return false; 
     }
   },
+
   async deleteInspection(id) {
     try {
       const { error } = await supabase.from('fims_inspections').delete().eq('id', String(id));
@@ -112,6 +116,7 @@ export const dataService = {
       return true;
     } catch (error) { console.error('[dataService] deleteInspection exception:', error); return false; }
   },
+
   async syncInspections(inspections) {
     try {
       if (!inspections || inspections.length === 0) return true;
@@ -151,6 +156,7 @@ export const dataService = {
       return false; 
     }
   },
+
   async fetchLocations() {
     try {
       const { data, error } = await supabase.from('fims_locations').select('*').order('name');
@@ -160,6 +166,7 @@ export const dataService = {
       return { success: true, locations };
     } catch (error) { console.error('[dataService] fetchLocations exception:', error); return { success: false, locations: [] }; }
   },
+
   async syncLocations(locations) {
     try {
       if (!locations || locations.length === 0) return true;
@@ -176,6 +183,7 @@ export const dataService = {
       return errorCount === 0;
     } catch (error) { console.error('[dataService] syncLocations exception:', error); return false; }
   },
+
   subscribeToInspectionChanges(onChange) {
     console.log('[dataService] Setting up inspections real-time...');
     
@@ -187,6 +195,7 @@ export const dataService = {
         table: 'fims_inspections' 
       }, (payload) => {
         console.log('[dataService] Inspections event:', payload.eventType);
+        
         // Formatar o payload igual ao fetchInspections
         if (payload.new) {
           const dataContent = payload.new.data || {};
@@ -198,8 +207,13 @@ export const dataService = {
             status: payload.new.status || dataContent.status,
             date: payload.new.date || dataContent.date,
             location_name: payload.new.location_name || dataContent.location_name,
+            location_id: payload.new.location_id || dataContent.location_id,
             alert_level: payload.new.alert_level || dataContent.alert_level,
             type: payload.new.type || dataContent.type,
+            // GARANTIR QUE DADOS PESADOS VÊM DO JSONB NO REALTIME
+            items: dataContent.items || [],
+            sections: dataContent.sections || [],
+            photosByItem: dataContent.photosByItem || {},
             updated_at: payload.new.updated_at,
             created_at: payload.new.created_at
           };
@@ -224,6 +238,7 @@ export const dataService = {
       supabase.removeChannel(channel); 
     };
   },
+
   subscribeToLocationChanges(onChange) {
     console.log('[dataService] Setting up locations real-time...');
     const channelName = `fims-locations-${Date.now()}`;
@@ -235,12 +250,12 @@ export const dataService = {
       .subscribe((status) => { console.log('[dataService] Locations realtime status:', status); });
     return () => { console.log('[dataService] Unsubscribing from locations'); supabase.removeChannel(channel); };
   },
+
   /**
    * Eliminar todas as inspeções do Supabase
    */
   async deleteAllInspections() {
     try {
-      // Supabase não permite DELETE sem WHERE, usar um truque
       const { data: allIds } = await supabase
         .from('fims_inspections')
         .select('id')
@@ -249,7 +264,6 @@ export const dataService = {
       if (allIds && allIds.length > 0) {
         const idsToDelete = allIds.map(row => row.id);
         
-        // Deletar em lotes de 500
         const batchSize = 500;
         for (let i = 0; i < idsToDelete.length; i += batchSize) {
           const batch = idsToDelete.slice(i, i + batchSize);
@@ -271,12 +285,12 @@ export const dataService = {
       return { success: false, error: error.message };
     }
   },
+
   /**
    * Eliminar inspeções anteriores a uma data
    */
   async deleteInspectionsBeforeDate(date) {
     try {
-      // Contar primeiro
       const { count } = await supabase
         .from('fims_inspections')
         .select('*', { count: 'exact', head: true })
@@ -286,7 +300,6 @@ export const dataService = {
         return { success: true, deleted: 0, message: 'Nenhuma inspeção anterior a essa data' };
       }
       
-      // Deletar
       const { error } = await supabase
         .from('fims_inspections')
         .delete()
@@ -301,6 +314,7 @@ export const dataService = {
       return { success: false, error: error.message };
     }
   },
+
   /**
    * Contar inspeções no Supabase
    */
@@ -317,4 +331,3 @@ export const dataService = {
     }
   }
 };
-
