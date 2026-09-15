@@ -269,7 +269,19 @@ function AppContent() {
             });
           } else if (payload.eventType === 'UPDATE' && payload.new) {
             setInspections(prev => {
-              const updated = prev.map(i => String(i.id) === String(payload.new.id) ? payload.new : i);
+              const updated = prev.map(i => {
+                if (String(i.id) === String(payload.new.id)) {
+                  // FUSÃO: Se o Realtime vier sem itens/fotos, manter os que já estão no ecrã
+                  return {
+                    ...i,
+                    ...payload.new,
+                    items: (payload.new.items && payload.new.items.length > 0) ? payload.new.items : (i.items || []),
+                    sections: (payload.new.sections && payload.new.sections.length > 0) ? payload.new.sections : (i.sections || []),
+                    photosByItem: (payload.new.photosByItem && Object.keys(payload.new.photosByItem).length > 0) ? payload.new.photosByItem : (i.photosByItem || {}),
+                  };
+                }
+                return i;
+              });
               dataStore.set(STORAGE_KEYS.INSPECTIONS, updated);
               return updated;
             });
@@ -358,7 +370,6 @@ function AppContent() {
     setPage("inspections");
   };
   
-  // FUNÇÃO: INICIAR INSPEÇÃO
   const handleStartInspection = async (insp) => {
     let updated = { ...insp };
     let needsSave = false;
@@ -392,7 +403,6 @@ function AppContent() {
     }
   };
   
-  // FUNÇÃO: GUARDAR RASCUNHO
   const handleSaveInspection = async (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     setEditingInspection(updated);
@@ -403,7 +413,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao salvar rascunho no Supabase:", error); }
   };
   
-  // FUNÇÃO: SUBMETER INSPEÇÃO
   const handleSubmitInspection = async (updated) => {
     setInspections(prev => prev.map(i => i.id === updated.id ? updated : i));
     setEditingInspection(null);
@@ -428,7 +437,6 @@ function AppContent() {
     }
   };
   
-  // FUNÇÃO: ACEITAR TAREFA
   const handleAcceptTask = async (insp) => {
     const existing = inspections.find(i => i.id === insp.id) || {};
     const merged = { ...existing, accepted: true, status: "pending" };
@@ -442,7 +450,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao salvar aceitação no Supabase:", error); }
   };
   
-  // FUNÇÃO: RECUSAR TAREFA
   const handleDeclineTask = async (insp) => {
     const reason = prompt("Motivo da recusa:", "");
     if (reason === null) return;
@@ -473,7 +480,6 @@ function AppContent() {
     alert("Folga registada.");
   };
   
-  // FUNÇÃO: EXCLUIR INSPEÇÃO
   const handleDelete = async (id) => {
     setInspections(prev => prev.filter(i => i.id !== id));
     addAuditLog(currentUser, "Excluir", "inspection", `Excluiu a inspeção ID: ${id}`);
@@ -483,7 +489,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao exuir no Supabase:", error); }
   };
   
-  // FUNÇÃO: CRIAR INSPEÇÃO
   const handleCreateInspection = async (insp) => {
     setInspections(prev => [insp, ...prev]);
     setShowNewModal(false);
@@ -495,7 +500,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao salvar nova inspeção no Supabase:", error); }
   };
   
-  // FUNÇÃO: ATUALIZAR INSPEÇÃO (Aprovar/Rejeitar do Supervisor)
   const handleUpdateInspection = async (updated) => {
     const existing = inspections.find(i => i.id === updated.id) || {};
     const merged = { ...existing, ...updated };
@@ -511,7 +515,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao salvar atualização no Supabase:", error); }
   };
 
-  // FUNÇÃO: CRIAR DESPACHO (Schedule)
   const handleCreateSchedule = async (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
       const template = getClientTemplate(task.location_name);
@@ -539,7 +542,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao salvar despacho no Supabase:", error); }
   };
 
-  // FUNÇÃO: DESPACHO MÚLTIPLO
   const handleBulkSchedule = async (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
       const template = getClientTemplate(task.location_name);
@@ -567,7 +569,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao salvar despacho múltiplo no Supabase:", error); }
   };
 
-  // FUNÇÃO: MOVER TAREFA (Drag/Drop)
   const handleDragUpdate = async (updated, notifyInspector = true) => {
     const existing = inspections.find(i => i.id === updated.id) || {};
     const merged = { ...existing, ...updated };
@@ -583,7 +584,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao salvar move no Supabase:", error); }
   };
 
-  // FUNÇÃO: REAGENDAR
   const handleConfirmReschedule = async (updated, notifyClient, notifyInspector) => {
     const existing = inspections.find(i => i.id === updated.id) || {};
     const merged = { ...existing, ...updated };
@@ -599,7 +599,6 @@ function AppContent() {
     } catch (error) { console.error("Erro ao salvar reagendamento no Supabase:", error); }
   };
 
-  // --- RENDER ---
   if (!isInitialized) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>

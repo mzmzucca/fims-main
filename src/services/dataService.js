@@ -19,7 +19,6 @@ export const dataService = {
         return {
           ...dataContent,
           id: row.id,
-          // Garantir que estas colunas estão presentes (vêm da tabela, não do JSONB)
           inspector_id: row.inspector_id || dataContent.inspector_id,
           inspector_name: row.inspector_name || dataContent.inspector_name,
           status: row.status || dataContent.status,
@@ -28,11 +27,9 @@ export const dataService = {
           location_id: row.location_id || dataContent.location_id,
           alert_level: row.alert_level || dataContent.alert_level,
           type: row.type || dataContent.type,
-          // GARANTIR QUE DADOS PESADOS VÊM DO JSONB
           items: dataContent.items || [],
           sections: dataContent.sections || [],
           photosByItem: dataContent.photosByItem || {}, 
-          // Metadados
           updated_at: row.updated_at,
           created_at: row.created_at
         };
@@ -40,7 +37,6 @@ export const dataService = {
       
       console.log(`[dataService] Fetched ${inspections.length} inspections`);
       
-      // Debug: mostrar inspector_ids
       const withInspector = inspections.filter(i => i.inspector_id);
       if (withInspector.length > 0) {
         const uniqueIds = [...new Set(withInspector.map(i => i.inspector_id))];
@@ -83,9 +79,27 @@ export const dataService = {
 
   async saveInspection(inspection) {
     try {
+      // BUSCAR DADOS EXISTENTES NO BANCO PARA EVITAR SOBRESCREVER ITENS/FOTOS
+      const { data: existingRow } = await supabase
+        .from('fims_inspections')
+        .select('data')
+        .eq('id', String(inspection.id))
+        .single();
+
+      const existingData = existingRow?.data || {};
+      
+      // FUSÃO PROFUNDA: Garantir que não apagamos itens e fotos se a atualização for parcial
+      const mergedData = {
+        ...existingData,
+        ...inspection,
+        items: (inspection.items && inspection.items.length > 0) ? inspection.items : (existingData.items || []),
+        sections: (inspection.sections && inspection.sections.length > 0) ? inspection.sections : (existingData.sections || []),
+        photosByItem: (inspection.photosByItem && Object.keys(inspection.photosByItem).length > 0) ? inspection.photosByItem : (existingData.photosByItem || {}),
+      };
+
       const row = { 
         id: String(inspection.id), 
-        data: inspection,  // Guardar tudo no JSONB (inclui items, sections e photosByItem)
+        data: mergedData,  // Guardar os dados fundidos no JSONB
         inspector_id: String(inspection.inspector_id || ''),
         inspector_name: inspection.inspector_name || null,
         status: inspection.status || 'pending',
@@ -196,7 +210,6 @@ export const dataService = {
       }, (payload) => {
         console.log('[dataService] Inspections event:', payload.eventType);
         
-        // Formatar o payload igual ao fetchInspections
         if (payload.new) {
           const dataContent = payload.new.data || {};
           payload.new = {
@@ -210,7 +223,6 @@ export const dataService = {
             location_id: payload.new.location_id || dataContent.location_id,
             alert_level: payload.new.alert_level || dataContent.alert_level,
             type: payload.new.type || dataContent.type,
-            // GARANTIR QUE DADOS PESADOS VÊM DO JSONB NO REALTIME
             items: dataContent.items || [],
             sections: dataContent.sections || [],
             photosByItem: dataContent.photosByItem || {},
@@ -251,9 +263,6 @@ export const dataService = {
     return () => { console.log('[dataService] Unsubscribing from locations'); supabase.removeChannel(channel); };
   },
 
-  /**
-   * Eliminar todas as inspeções do Supabase
-   */
   async deleteAllInspections() {
     try {
       const { data: allIds } = await supabase
@@ -286,9 +295,6 @@ export const dataService = {
     }
   },
 
-  /**
-   * Eliminar inspeções anteriores a uma data
-   */
   async deleteInspectionsBeforeDate(date) {
     try {
       const { count } = await supabase
@@ -315,9 +321,6 @@ export const dataService = {
     }
   },
 
-  /**
-   * Contar inspeções no Supabase
-   */
   async countInspections() {
     try {
       const { count, error } = await supabase
