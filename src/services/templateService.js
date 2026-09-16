@@ -7,6 +7,16 @@ import { supabase, TABLES } from '../lib/supabase';
 export const templateService = {
   _progressCallback: null,
 
+  // Função auxiliar para normalizar textos (remove acentos e espaços extras)
+  normalizeText(str) {
+    if (!str) return "";
+    return str.toString()
+      .normalize("NFD") // Decompor caracteres acentuados
+      .replace(/[\u0300-\u036f]/g, "") // Remover diacríticos (acentos)
+      .toLowerCase()
+      .trim();
+  },
+
   /**
    * Busca todos os templates do Supabase
    */
@@ -53,7 +63,7 @@ export const templateService = {
   },
 
   /**
-   * Busca template pelo nome do cliente
+   * Busca template pelo nome do cliente (com suporte a acentos)
    */
   async fetchTemplateByClientName(clientName) {
     try {
@@ -61,7 +71,7 @@ export const templateService = {
         return { success: false, error: 'Nome do cliente não fornecido' };
       }
 
-      // Busca exata primeiro
+      // 1. Busca exata primeiro
       const { data, error } = await supabase
         .from(TABLES.TEMPLATES)
         .select('*')
@@ -74,7 +84,7 @@ export const templateService = {
         return this.formatTemplate(data[0]);
       }
 
-      // Busca parcial (case insensitive)
+      // 2. Busca parcial (case insensitive)
       const { data: partialData, error: partialError } = await supabase
         .from(TABLES.TEMPLATES)
         .select('*')
@@ -85,6 +95,32 @@ export const templateService = {
       
       if (partialData && partialData.length > 0) {
         return this.formatTemplate(partialData[0]);
+      }
+
+      // 3. FALLBACK LOCAL: Buscar todos e comparar sem acentos (resolve problema de Ç, Ã, etc.)
+      const { data: allData, error: allError } = await supabase
+        .from(TABLES.TEMPLATES)
+        .select('*');
+
+      if (!allError && allData) {
+        const searchNormalized = this.normalizeText(clientName);
+        
+        // Tenta correspondência exata sem acentos
+        let match = allData.find(item => 
+          this.normalizeText(item.client_name) === searchNormalized
+        );
+
+        // Tenta correspondência parcial sem acentos
+        if (!match) {
+          match = allData.find(item => 
+            this.normalizeText(item.client_name).includes(searchNormalized) || 
+            searchNormalized.includes(this.normalizeText(item.client_name))
+          );
+        }
+
+        if (match) {
+          return this.formatTemplate(match);
+        }
       }
 
       return { success: false, error: 'Template não encontrado' };
@@ -114,7 +150,7 @@ export const templateService = {
   },
 
   /**
-   * Normaliza sections para formato consistente
+   * Normaliza sections para formato consistente (converte String em Array se necessário)
    */
   normalizeSections(sections) {
     if (!sections) return [];
@@ -129,7 +165,6 @@ export const templateService = {
       }
     }
     
-    // Agora que garantimos que é um objeto, verificamos se é um Array
     if (!Array.isArray(sections)) return [];
     
     return sections.map(section => {
@@ -185,7 +220,7 @@ export const templateService = {
   },
 
   /**
-   * Busca no localStorage
+   * Busca no localStorage (com suporte a acentos)
    */
   getFromLocalStorage(clientName) {
     try {
@@ -193,22 +228,22 @@ export const templateService = {
       
       if (!clientName) return null;
       
-      const searchName = clientName.toLowerCase().trim();
+      const searchName = this.normalizeText(clientName);
       
-      // Busca exata
+      // Busca exata normalizada (sem acentos)
       for (const key of Object.keys(templates)) {
         const template = templates[key];
-        if (template.clientName && template.clientName.toLowerCase() === searchName) {
+        if (template.clientName && this.normalizeText(template.clientName) === searchName) {
           return template;
         }
       }
       
-      // Busca parcial
+      // Busca parcial normalizada
       for (const key of Object.keys(templates)) {
         const template = templates[key];
         if (template.clientName && 
-            (template.clientName.toLowerCase().includes(searchName) || 
-             searchName.includes(template.clientName.toLowerCase()))) {
+            (this.normalizeText(template.clientName).includes(searchName) || 
+             searchName.includes(this.normalizeText(template.clientName)))) {
           return template;
         }
       }
