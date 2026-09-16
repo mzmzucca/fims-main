@@ -13,7 +13,7 @@ export const templateService = {
   async fetchAllTemplates() {
     try {
       const { data, error } = await supabase
-        .from(TABLES.TEMPLATES)  // ✅ Usa fims_templates
+        .from(TABLES.TEMPLATES)
         .select('*')
         .order('client_name', { ascending: true });
 
@@ -63,7 +63,7 @@ export const templateService = {
 
       // Busca exata primeiro
       const { data, error } = await supabase
-        .from(TABLES.TEMPLATES)  // ✅ Usa fims_templates
+        .from(TABLES.TEMPLATES)
         .select('*')
         .eq('client_name', clientName)
         .limit(1);
@@ -117,7 +117,20 @@ export const templateService = {
    * Normaliza sections para formato consistente
    */
   normalizeSections(sections) {
-    if (!sections || !Array.isArray(sections)) return [];
+    if (!sections) return [];
+    
+    // CORREÇÃO: Se vier como String (texto) do banco de dados, converter para Array
+    if (typeof sections === 'string') {
+      try {
+        sections = JSON.parse(sections);
+      } catch (e) {
+        console.error('Erro ao fazer parse das sections (string inválida):', e);
+        return [];
+      }
+    }
+    
+    // Agora que garantimos que é um objeto, verificamos se é um Array
+    if (!Array.isArray(sections)) return [];
     
     return sections.map(section => {
       const sectionId = section.id || `section_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
