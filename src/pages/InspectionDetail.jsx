@@ -5,9 +5,8 @@ import { Icon } from "../lib/icons";
 import ScoreRing from "../components/ScoreRing";
 import StatusBadge from "../components/StatusBadge";
 import { photoStore } from "../lib/photoStore";
-import { getClientTemplate, ROLES } from "../data/constants";
+import { ROLES } from "../data/constants";
 import { scoreLabel, getCategoryHealth, generateAISummary } from "../lib/helpers";
-
 export default function InspectionDetail({ inspection, currentUser, onBack, onUpdate, addAuditLog, allInspections }) {
   const [activeTab, setActiveTab] = useState("resumo");
   const [photosByItem, setPhotosByItem] = useState({});
@@ -17,19 +16,43 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
   const [qcItem, setQcItem] = useState(null);
   const [qcText, setQcText] = useState("");
   const [loading, setLoading] = useState(true);
-
+  // Verificar se o usuário pode revisar (ADMIN ou SUPERVISOR)
   const canReview = currentUser && [ROLES.ADMIN, ROLES.SUPERVISOR].includes(currentUser.role);
-
-  const template = getClientTemplate(inspection.location_name);
-  const TEMPLATE_SECTIONS = template.sections || [];
-
+  // ============================================================
+  // CORREÇÃO PRINCIPAL: Obter as secções DIRETAMENTE da inspeção
+  // Isto garante que os IDs batem com os items e fotos
+  // ============================================================
+  let TEMPLATE_SECTIONS = [];
+  if (inspection.sections && inspection.sections.length > 0) {
+    TEMPLATE_SECTIONS = inspection.sections.map(s => ({
+      id: s.id,
+      name: s.title || s.name || "Seção",
+      title: s.title || s.name || "Seção"
+    }));
+  } else {
+    // Fallback: extrair secções únicas dos items se as secções estiverem vazias
+    const sectionMap = {};
+    (inspection.items || []).forEach(item => {
+      if (item.section_id && !sectionMap[item.section_id]) {
+        sectionMap[item.section_id] = {
+          id: item.section_id,
+          name: "Seção",
+          title: "Seção"
+        };
+      }
+    });
+    TEMPLATE_SECTIONS = Object.values(sectionMap);
+  }
+  // ============================================================
   useEffect(() => {
     const loadPhotos = async () => {
       setLoading(true);
       try {
+        // LER DIRETAMENTE DO JSON DA INSPEÇÃO
         if (inspection.photosByItem && Object.keys(inspection.photosByItem).length > 0) {
           setPhotosByItem(inspection.photosByItem);
         } else {
+          // Fallback para inspeções antigas
           const grouped = await photoStore.listByInspection(inspection.id);
           setPhotosByItem(grouped);
         }
@@ -41,7 +64,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
     };
     loadPhotos();
   }, [inspection.id, inspection.photosByItem]);
-
+  // Calcular estatísticas
   const totalItems = inspection.items?.length || 0;
   const scoredItems = inspection.items?.filter(i => i.score !== null) || [];
   const completedItems = scoredItems.length;
@@ -52,14 +75,16 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
   const criticalItems = scoredItems.filter(i => i.score <= 2);
   const okItems = scoredItems.filter(i => i.score >= 4);
   const mediumItems = scoredItems.filter(i => i.score === 3);
-
+  // Calcular scores por categoria
   const sectionScores = TEMPLATE_SECTIONS.map(s => {
     const sItems = inspection.items?.filter(i => i.section_id === s.id && i.score !== null) || [];
     const avg = sItems.length ? Math.round((sItems.reduce((sum, i) => sum + Number(i.score), 0) / (sItems.length * 5)) * 100) : null;
     const health = getCategoryHealth(sItems);
     return { ...s, avg, count: sItems.length, health };
   });
-
+  // ============================================================
+  // HEATMAP CORRIGIDO
+  // ============================================================
   const defectHeatmap = (() => {
     if (!allInspections || allInspections.length === 0) return [];
     
@@ -104,12 +129,10 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
     
     return results.slice(0, 10);
   })();
-
   const handleApprove = () => { 
     onUpdate({ ...inspection, status: "reviewed" }); 
     addAuditLog(currentUser, "Inspeção Aprovada", "review", `Aprovou a inspeção de ${inspection.location_name}`); 
   };
-
   const handleReject = () => {
     if (!rejectNote.trim()) return alert("Por favor, adicione uma nota de correção geral.");
     const updatedItems = inspection.items.map(i => 
@@ -126,12 +149,13 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
     setRejectNote(""); 
     setQcItem(null);
   };
-
+  // Funções de exportação (PDF E WORD COM FOTOS)
   const handleDownloadPDF = async () => {
     try {
       const doc = new jsPDF();
       const ai = generateAISummary(inspection.items, inspection.location_name);
       
+      // Header
       doc.setFillColor(30, 42, 58); 
       doc.rect(0, 0, 210, 30, 'F');
       doc.setTextColor(255, 255, 255); 
@@ -141,7 +165,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       doc.setFontSize(10); 
       doc.setFont("helvetica", "normal");
       doc.text("NEMCHEM - Field Inspection Management System", 105, 22, { align: "center" });
-
+      // Info Box
       doc.setFillColor(248, 247, 244); 
       doc.roundedRect(14, 35, 182, 30, 3, 3, 'F');
       doc.setTextColor(50, 50, 50); 
@@ -151,7 +175,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       doc.text(`Inspetor: ${inspection.inspector_name || "N/A"}`, 18, 55);
       doc.text(`Score Total: ${inspection.score_pct || 0}%`, 120, 43);
       doc.text(`Estado: ${(inspection.status || "N/A").toUpperCase()}`, 120, 49);
-
       let y = 72;
       doc.setFontSize(13); 
       doc.setTextColor(30, 42, 58); 
@@ -175,7 +198,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
         });
       }
       y += 6;
-
+      // Sections with Items
       for (const section of TEMPLATE_SECTIONS) {
         if (y > 250) { doc.addPage(); y = 20; }
         doc.setFillColor(30, 42, 58); 
@@ -185,7 +208,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
         doc.setFont("helvetica", "bold");
         doc.text(section.name || section.title || "Seção", 18, y + 5); 
         y += 10;
-
         const secData = inspection.sections?.find(s => s.id === section.id);
         if (secData?.observation) {
           doc.setFontSize(9); 
@@ -195,7 +217,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           doc.text(splitObs, 18, y); 
           y += splitObs.length * 5 + 3;
         }
-
         const sItems = inspection.items?.filter(i => i.section_id === section.id) || [];
         doc.setFontSize(10);
         for (const item of sItems) {
@@ -217,7 +238,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
         }
         y += 6;
       }
-
+      // ANEXO DE FOTOS NO PDF
       const allPhotosToPrint = [];
       for (const section of TEMPLATE_SECTIONS) {
         const secPhotos = photosByItem[section.id] || [];
@@ -228,7 +249,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           allPhotosToPrint.push({ sectionName: section.name || section.title || "Seção", photos: combined });
         }
       }
-
       if (allPhotosToPrint.length > 0) {
         doc.addPage();
         let py = 20;
@@ -264,9 +284,15 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           }
           if (imgX > 14) py += 40;
         }
+        // Atualizar a variável Y para a posição logo após a última foto
+        y = py; 
       }
-
+      // Signatures (MOVIDO PARA O FINAL - SEMPRE DEPOIS DAS FOTOS)
       if (y > 250) { doc.addPage(); y = 20; }
+      
+      // Adicionar uma quebra de linha extra para separar as assinaturas das fotos
+      y += 10;
+      
       if (inspection.inspector_sig) { 
         try { 
           doc.addImage(inspection.inspector_sig, 'PNG', 20, y, 40, 15); 
@@ -279,7 +305,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           doc.text("Client", 120, y + 20); 
         } catch(e) {} 
       }
-
       const pageCount = doc.internal.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) { 
         doc.setPage(i); 
@@ -293,7 +318,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       alert("Erro ao gerar PDF. Tente novamente.");
     }
   };
-
   const handleDownloadWord = () => {
     try {
       const ai = generateAISummary(inspection.items, inspection.location_name);
@@ -323,12 +347,10 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       </div>`;
       
       html += `<div class="ai-box"><strong>🤖 AI Executive Summary:</strong><br/>${ai.summary || "Resumo disponível após conclusão da inspeção."}<br/><br/><strong>Recommendations:</strong><ul>${(ai.recommendations || []).map(r => `<li>${r.replace(/\*\*/g, '')}</li>`).join('')}</ul></div>`;
-
       TEMPLATE_SECTIONS.forEach(section => {
         const secData = inspection.sections?.find(s => s.id === section.id);
         html += `<h2>${section.name || section.title || "Seção"}</h2>`;
         if (secData?.observation) html += `<div class="obs"><strong>Observation:</strong> ${secData.observation}</div>`;
-
         const sItems = inspection.items?.filter(i => i.section_id === section.id) || [];
         sItems.forEach(item => {
           const colors = ["#A32D2D", "#993C1D", "#BA7517", "#3B6D11", "#0F6E56"];
@@ -340,6 +362,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           html += `</div>`;
         });
         
+        // Adicionar fotos no Word
         const secPhotos = photosByItem[section.id] || [];
         const itemPhotos = sItems.flatMap(i => photosByItem[i.id] || []);
         const allPhotos = [...secPhotos, ...itemPhotos];
@@ -352,12 +375,11 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           html += `</div>`;
         }
       });
-
+      // Signatures
       html += `<div style="margin-top: 40px; display: flex; justify-content: space-between;">`;
       if (inspection.inspector_sig) html += `<div><img src="${inspection.inspector_sig}" style="width: 150px; height: 50px;" /><br/><strong>Inspector Signature</strong></div>`;
       if (inspection.client_sig) html += `<div><img src="${inspection.client_sig}" style="width: 150px; height: 50px;" /><br/><strong>Client Signature</strong></div>`;
       html += `</div>`;
-
       html += `</body></html>`;
       
       const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
@@ -374,7 +396,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       alert("Erro ao gerar Word. Tente novamente.");
     }
   };
-
+  // Se não houver dados, mostrar loading
   if (!inspection) {
     return (
       <div className="card" style={{ textAlign: "center", padding: 40 }}>
@@ -391,9 +413,9 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       </div>
     );
   }
-
   return (
     <div>
+      {/* Header */}
       <div className="page-header" style={{ flexWrap: "wrap", gap: "12px" }}>
         <div>
           <button className="btn btn-secondary btn-sm" onClick={onBack} style={{ marginBottom: 8 }}>
@@ -409,7 +431,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           <StatusBadge status={inspection.status} />
         </div>
       </div>
-
+      {/* Export Buttons */}
       <div className="card" style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 500 }}>📄 Exportar Relatório Oficial</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -426,7 +448,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           )}
         </div>
       </div>
-
+      {/* QC Actions */}
       {canReview && inspection.status === "submitted" && (
         <div className="card" style={{ marginBottom: 16, background: "#F8F7F4", border: "1px solid #EF9F27" }}>
           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>🔍 Controlo de Qualidade (QC)</div>
@@ -456,14 +478,13 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           )}
         </div>
       )}
-
       {inspection.status === "needs_corrections" && (
         <div className="alert-bar alert-critical">
           <Icon name="alert" size={14} />
           <div>Esta inspeção foi rejeitada e precisa de correções. Verifique os itens marcados.</div>
         </div>
       )}
-
+      {/* Tabs */}
       <div className="tabs" style={{ 
         display: "flex", 
         gap: 4, 
@@ -496,7 +517,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           </div>
         ))}
       </div>
-
+      {/* Tab: Resumo */}
       {activeTab === "resumo" && (
         <div className="two-col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <div className="card">
@@ -532,7 +553,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
               </div>
             )}
           </div>
-
           <div className="card">
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: "#1E2A3A" }}>
               ℹ️ Informações
@@ -582,7 +602,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           </div>
         </div>
       )}
-
+      {/* Tab: Detalhes */}
       {activeTab === "detalhes" && (
         <div>
           {TEMPLATE_SECTIONS.length > 0 ? (
@@ -622,14 +642,21 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
                       borderBottom: "0.5px solid rgba(0,0,0,0.05)",
                       display: "flex",
                       flexWrap: "wrap",
-                      alignItems: "flex-start",
+                      alignItems: "center",
+                      justifyContent: "space-between",
                       gap: 8
                     }}>
-                      <div style={{ flex: 1, fontSize: 13, color: "#444", minWidth: 200 }}>
+                      <div style={{ flex: 1, fontSize: 13, color: "#444", minWidth: 150 }}>
                         {item.label || item.text || "Item"}
                       </div>
                       {item.score !== null ? (
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <div style={{ 
+                          display: "flex", 
+                          gap: 8, 
+                          alignItems: "center", 
+                          minWidth: 110, 
+                          justifyContent: "flex-end"
+                        }}>
                           <div style={{ 
                             width: 28, 
                             height: 28, 
@@ -644,12 +671,12 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
                           }}>
                             {item.score}
                           </div>
-                          <span style={{ fontSize: 11, color: "#888" }}>
+                          <span style={{ fontSize: 11, color: "#888", width: 70, textAlign: "left" }}>
                             {["Mau", "Deficiente", "Média", "Bom", "Excelente"][item.score - 1]}
                           </span>
                         </div>
                       ) : (
-                        <span style={{ fontSize: 12, color: "#B4B2A9" }}>N/A</span>
+                        <span style={{ fontSize: 12, color: "#B4B2A9", minWidth: 110, textAlign: "right" }}>N/A</span>
                       )}
                       
                       {item.comment && (
@@ -676,7 +703,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           )}
         </div>
       )}
-
+      {/* Tab: Evidências */}
       {activeTab === "evidencias" && (
         <div>
           {loading ? (
@@ -764,7 +791,9 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           )}
         </div>
       )}
-
+      {/* ============================================================ */}
+      {/* Tab: Heatmap - CORRIGIDO */}
+      {/* ============================================================ */}
       {activeTab === "heatmap" && (
         <div className="card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
@@ -875,6 +904,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
                 );
               })}
               
+              {/* Legenda */}
               <div style={{ 
                 marginTop: 16, 
                 display: "flex", 
@@ -899,6 +929,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
                 </div>
               </div>
               
+              {/* Recomendação */}
               {defectHeatmap.some(d => d.count >= 3) && (
                 <div style={{ 
                   marginTop: 12, 
@@ -922,7 +953,7 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           )}
         </div>
       )}
-
+      {/* Lightbox */}
       {lightboxUrl && (
         <div 
           className="photo-lightbox-overlay" 
@@ -968,7 +999,6 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
           </button>
         </div>
       )}
-
       <style>{`
         .tabs {
           display: flex;

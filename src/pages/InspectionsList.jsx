@@ -19,8 +19,24 @@ export default function InspectionsList({
   // Verificar se o usuário pode excluir (Admin ou CEO)
   const canDelete = currentUser && [ROLES.ADMIN, ROLES.CEO].includes(currentUser.role);
 
+  // ============================================================
+  // CONTROLO DE ACESSO BASEADO EM ROLE (RBAC)
+  // ============================================================
+  let accessibleInspections = inspections;
+  
+  if (currentUser.role === ROLES.INSPECTOR) {
+    // Inspetores só veem as inspeções atribuídas a eles
+    accessibleInspections = inspections.filter(i => 
+      String(i.inspector_id) === String(currentUser.id) && i.type !== "leave"
+    );
+  } else {
+    // Supervisores, Admins e CEOs veem TODAS as inspeções
+    accessibleInspections = inspections.filter(i => i.type !== "leave");
+  }
+  // ============================================================
+
   // Filtrar inspeções
-  let filtered = inspections;
+  let filtered = accessibleInspections;
   
   if (filterStatus !== "all") {
     filtered = filtered.filter(i => i.status === filterStatus);
@@ -85,7 +101,7 @@ export default function InspectionsList({
         <div>
           <div className="page-title">📋 Inspeções</div>
           <div className="page-sub">
-            {filtered.length} de {inspections.length} inspeções
+            {filtered.length} de {accessibleInspections.length} inspeções
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -496,7 +512,7 @@ export default function InspectionsList({
         
         .page-sub {
           font-size: 13px;
-          color: #888;
+          color: "#888",
           margin-top: 2px;
         }
         
