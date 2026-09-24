@@ -26,12 +26,9 @@ export const templateService = {
         .from(TABLES.TEMPLATES)
         .select('*')
         .order('client_name', { ascending: true });
-
       if (error) throw error;
-
       const templates = {};
       const clients = [];
-
       data.forEach(item => {
         const normalizedSections = this.normalizeSections(item.sections);
         
@@ -43,7 +40,6 @@ export const templateService = {
           totalItems: normalizedSections.reduce((sum, s) => sum + (s.items ? s.items.length : 0), 0),
           lastUpdated: item.last_updated || item.created_at
         };
-
         templates[item.client_id] = template;
         templates[item.client_name] = template;
         clients.push({
@@ -54,7 +50,6 @@ export const templateService = {
           lastUpdated: item.last_updated || item.created_at
         });
       });
-
       return { templates, clients, success: true };
     } catch (error) {
       console.error('Erro ao buscar templates:', error);
@@ -70,38 +65,31 @@ export const templateService = {
       if (!clientName) {
         return { success: false, error: 'Nome do cliente não fornecido' };
       }
-
       // 1. Busca exata primeiro
       const { data, error } = await supabase
         .from(TABLES.TEMPLATES)
         .select('*')
         .eq('client_name', clientName)
         .limit(1);
-
       if (error) throw error;
-
       if (data && data.length > 0) {
         return this.formatTemplate(data[0]);
       }
-
       // 2. Busca parcial (case insensitive)
       const { data: partialData, error: partialError } = await supabase
         .from(TABLES.TEMPLATES)
         .select('*')
         .ilike('client_name', `%${clientName}%`)
         .limit(1);
-
       if (partialError) throw partialError;
       
       if (partialData && partialData.length > 0) {
         return this.formatTemplate(partialData[0]);
       }
-
       // 3. FALLBACK LOCAL: Buscar todos e comparar sem acentos (resolve problema de Ç, Ã, etc.)
       const { data: allData, error: allError } = await supabase
         .from(TABLES.TEMPLATES)
         .select('*');
-
       if (!allError && allData) {
         const searchNormalized = this.normalizeText(clientName);
         
@@ -109,7 +97,6 @@ export const templateService = {
         let match = allData.find(item => 
           this.normalizeText(item.client_name) === searchNormalized
         );
-
         // Tenta correspondência parcial sem acentos
         if (!match) {
           match = allData.find(item => 
@@ -117,12 +104,10 @@ export const templateService = {
             searchNormalized.includes(this.normalizeText(item.client_name))
           );
         }
-
         if (match) {
           return this.formatTemplate(match);
         }
       }
-
       return { success: false, error: 'Template não encontrado' };
     } catch (error) {
       console.error('Erro ao buscar template por nome:', error);
@@ -183,7 +168,6 @@ export const templateService = {
           note: item.note || ''
         };
       });
-
       return {
         id: sectionId,
         title: sectionTitle,
@@ -203,7 +187,6 @@ export const templateService = {
       console.log(`[templateService] Template no localStorage: ${clientName}`);
       return localTemplate;
     }
-
     // 2. Supabase
     console.log(`[templateService] Buscando no Supabase: ${clientName}`);
     const result = await this.fetchTemplateByClientName(clientName);
@@ -213,7 +196,6 @@ export const templateService = {
       console.log(`[templateService] Template do Supabase: ${clientName} (${result.template.totalItems} itens)`);
       return result.template;
     }
-
     // 3. Estático
     console.log(`[templateService] Usando estático: ${clientName}`);
     return this.getStaticTemplate(clientName);
@@ -323,12 +305,9 @@ export const templateService = {
       if (!result.success) {
         throw new Error(result.error);
       }
-
       localStorage.setItem('fims_templates', JSON.stringify(result.templates));
       localStorage.setItem('fims_template_clients', JSON.stringify(result.clients));
-
       console.log(`[templateService] Sincronizados ${result.clients.length} templates`);
-
       return {
         success: true,
         templates: result.templates,
@@ -350,7 +329,6 @@ export const templateService = {
         .from(TABLES.TEMPLATES)
         .select('count')
         .limit(1);
-
       if (error) throw error;
       return { success: true, message: 'Conexão OK' };
     } catch (error) {
@@ -363,5 +341,42 @@ export const templateService = {
    */
   setProgressCallback(callback) {
     this._progressCallback = callback;
-  }
+  },
+
+  // FUNÇÃO ADICIONADA PARA SINCRONIZAR COM O SUPABASE
+  async syncLocalTemplates() {
+    try {
+      const localTemplatesStr = localStorage.getItem('fims_templates');
+      if (!localTemplatesStr) {
+        return { success: false, error: "Nenhum template local encontrado no localStorage." };
+      }
+      
+      const localTemplates = JSON.parse(localTemplatesStr);
+      // Converter objeto em array se necessário
+      const templatesArray = Array.isArray(localTemplates) 
+        ? localTemplates 
+        : Object.values(localTemplates);
+      
+      const rowsToInsert = templatesArray.map(t => ({
+        client_id: t.clientId,
+        client_name: t.clientName,
+        sections: t.sections,
+        version: t.version || '1.0',
+        total_items: t.totalItems || (t.sections || []).reduce((acc, s) => acc + (s.items?.length || 0), 0),
+        last_updated: new Date().toISOString()
+      }));
+
+      const { error } = await supabase
+        .from('fims_templates')
+        .upsert(rowsToInsert, { onConflict: 'client_id' });
+
+      if (error) throw error;
+      
+      console.log(`[templateService] Sincronizados ${rowsToInsert.length} templates para o Supabase.`);
+      return { success: true, count: rowsToInsert.length };
+    } catch (error) {
+      console.error('[templateService] Erro ao sincronizar templates:', error.message);
+      return { success: false, error: error.message };
+    }
+  },
 };

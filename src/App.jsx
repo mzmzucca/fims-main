@@ -41,11 +41,31 @@ const STORAGE_KEYS = {
   MESSAGES_DRAFT: "fims_messages_draft",
 };
 
+// Função de Validação Estrita: Template vs Inspeção
+function validateInspectionAgainstTemplate(template, inspectionItems) {
+  if (!template || !template.sections) {
+    return { valid: true, error: null }; // Se não há template, não valida
+  }
+  
+  // Contar itens do template original
+  const templateItemsCount = template.sections.reduce((acc, s) => acc + (s.items?.length || 0), 0);
+  const inspectionItemsCount = inspectionItems?.length || 0;
+  
+  // Validação 100% exata
+  if (templateItemsCount !== inspectionItemsCount) {
+    return {
+      valid: false,
+      error: `ERRO DE INTEGRIDADE: Template tem ${templateItemsCount} itens, mas a inspeção foi criada com ${inspectionItemsCount} itens. ${templateItemsCount - inspectionItemsCount} itens estão em falta.`
+    };
+  }
+  
+  return { valid: true, error: null };
+}
+
 function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }) {
   const [locId, setLocId] = useState("");
   const [inspectorId, setInspectorId] = useState(currentUser.role === ROLES.INSPECTOR ? currentUser.id : "");
   const [selectedClient, setSelectedClient] = useState(null);
-
   const handleLocationChange = (e) => {
     const id = e.target.value;
     setLocId(id);
@@ -56,7 +76,6 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
       setSelectedClient(null);
     }
   };
-
   const handleCreate = () => {
     if (!locId) return;
     const loc = locations.find(l => l.id === Number(locId));
@@ -107,7 +126,6 @@ function NewInspectionModal({ locations, users, currentUser, onClose, onCreate }
     };
     onCreate(insp);
   };
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
@@ -246,7 +264,6 @@ function AppContent() {
     if (!isInitialized || !currentUser) return;
     let unsubscribed = false;
     let cleanupRealtime = null;
-
     async function syncInspections() {
       try {
         const { dataService } = await import('./services/dataService');
@@ -291,9 +308,7 @@ function AppContent() {
         console.error('[App] Erro na sincronização:', error);
       }
     }
-
     syncInspections();
-
     return () => {
       unsubscribed = true;
       if (cleanupRealtime) cleanupRealtime();
@@ -394,7 +409,6 @@ function AppContent() {
     setViewingInspection(null);
     localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
     setPage("inspections");
-
     if (needsSave) {
       try {
         const { dataService } = await import('./services/dataService');
@@ -423,7 +437,6 @@ function AppContent() {
       const { dataService } = await import('./services/dataService');
       await dataService.saveInspection(updated);
     } catch (error) { console.error("Erro ao submeter no Supabase:", error); }
-
     addAuditLog(currentUser, "Notificação Enviada", "notification", `Email e WhatsApp enviados para o Supervisor (${updated.supervisor_name}) sobre a inspeção em ${updated.location_name}`);
     notify(3, `Nova inspeção submetida por ${currentUser.name} para ${updated.location_name}.`, "inspections");
     
@@ -490,6 +503,16 @@ function AppContent() {
   };
   
   const handleCreateInspection = async (insp) => {
+    const template = getClientTemplate(insp.location_name);
+    
+    // VALIDAÇÃO AUTOMÁTICA
+    const validation = validateInspectionAgainstTemplate(template, insp.items);
+    if (!validation.valid) {
+      console.error("[App] " + validation.error);
+      alert(`Inspeção Inválida!\n\n${validation.error}\n\nA inspeção não será criada até que a estrutura corresponda 100% ao template.`);
+      return; // Bloqueia a criação
+    }
+
     setInspections(prev => [insp, ...prev]);
     setShowNewModal(false);
     setEditingInspection(insp);
@@ -518,6 +541,15 @@ function AppContent() {
   const handleCreateSchedule = async (tasks) => {
     const tasksWithTemplates = tasks.map(task => {
       const template = getClientTemplate(task.location_name);
+      
+      // VALIDAÇÃO AUTOMÁTICA
+      const validation = validateInspectionAgainstTemplate(template, task.items);
+      if (!validation.valid) {
+        console.error("[App] " + validation.error);
+        alert(`Inspeção Inválida para ${task.location_name}!\n\n${validation.error}`);
+        return null; // Marca para ser filtrado
+      }
+      
       const templateSections = template.sections || [];
       return {
         ...task,
@@ -527,7 +559,9 @@ function AppContent() {
         template_version: template.version || "1.0",
         photosByItem: {}
       };
-    });
+    }).filter(Boolean); // Remove os que falharam a validação
+
+    if (tasksWithTemplates.length === 0) return; // Se todos falharam, aborta
     
     setInspections(prev => [...tasksWithTemplates, ...prev]);
     setShowScheduleModal(false);

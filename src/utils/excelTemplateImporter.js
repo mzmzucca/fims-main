@@ -250,36 +250,42 @@ function extractTemplateFromSheet(sheetName, data) {
 
 function isSectionHeader(text, fullRow) {
   if (!text) return false;
+  const cleaned = text.trim();
   
-  const upperText = text.toUpperCase().trim();
-  
-  const headers = [
-    'PESSOAL DE LIMPEZAS', 'EXTERIOR', 'INTERIOR', 'GABINETES', 'CARPETE',
-    'CHÃO', 'PAREDES', 'MÓVEIS', 'COPAS', 'CASAS DE BANHO', 'CORREDORES',
-    'ELEVADORES', 'ESCADAS', 'JARDIM', 'PISCINA', 'RECEPÇÃO', 'SALA DE AULAS',
-    'ADMINISTRAÇÃO', 'PARQUE DE ESTACIONAMENTO', 'DEPOSITO DE LIXO', 'DRENOS',
-    'GINÁSIO', 'BALNEARIOS', 'ENTRADA', 'RECEPÇÃO E CORREDORES',
-    'CHÃO TIJOLEIRAS', 'CHÃO DIFICIL', 'SALA DE JOGOS', 'CENTRO SOCIAL',
-    'MÓVEIS E OUTROS DECORATIVOS', 'MÓVEIS E OTROS DECORATIVOS',
-    'PESSOAL', 'LIMPEZAS', 'GABINETE', 'ELEVADOR'
-  ];
-  
-  for (const header of headers) {
-    if (upperText.includes(header) || header.includes(upperText)) {
-      return true;
-    }
-  }
-  
-  const words = upperText.split(/\s+/).filter(w => w.length > 1);
-  if (words.length >= 3 && upperText === upperText && !text.includes('?')) {
-    const itemKeywords = ['limpo', 'livre', 'regularmente', 'manchas', 'poeira', 'teias'];
-    const hasKeyword = itemKeywords.some(kw => upperText.includes(kw.toUpperCase()));
-    if (!hasKeyword) {
-      return true;
-    }
+  // Regra estrita: Secções no Excel estão SEMPRE em MAIÚSCULAS e não são perguntas (não têm ?)
+  // Isto garante 100% de match com a estrutura visual do template original.
+  if (cleaned === cleaned.toUpperCase() && cleaned.length > 2 && !cleaned.includes('?')) {
+    // Ignorar linhas de cabeçalho do Excel que também podem estar em maiúsculas
+    const ignoreHeaders = ['HEAD', 'DATA', 'TOTAL', 'PONTUAÇÃO DESTA ÁREA', 'PONTUAÇÃO TOTAL'];
+    if (ignoreHeaders.includes(cleaned.toUpperCase())) return false;
+    return true;
   }
   
   return false;
+}
+
+function isValidInspectionItem(text, fullRow) {
+  if (!text) return false;
+  const cleaned = text.trim();
+  if (cleaned.length < 3) return false; // Rejeitar apenas vazios ou 1 letra
+  
+  // Ignorar cabeçalhos do Excel e linhas de pontuação
+  const ignorePatterns = [
+    /^HEAD/i, /^Relatório de inspeção/i, /^Sistemas de pontos/i, /^DATA/i, 
+    /^[0-9]+\.\s/i, /^Pontuação desta área/i, /^Pontuação total/i, 
+    /^5\. Excelente/i, /^4\. Acima da média/i, /^3\. média/i, /^2\. Deficiente/i, /^1\. Mau/i,
+    /^\*/i // Ignorar linhas que são apenas asteriscos ou marcadores vazios
+  ];
+  
+  for (const pattern of ignorePatterns) {
+    if (pattern.test(cleaned)) {
+      return false;
+    }
+  }
+  
+  // Se passou nos filtros de cabeçalho, é um item válido. 
+  // Não usamos mais matching de palavras-chave.
+  return true;
 }
 
 function cleanSectionTitle(text) {
@@ -289,54 +295,6 @@ function cleanSectionTitle(text) {
   cleaned = cleaned.replace(/^[\d]+[\.\s]+/, '');
   cleaned = cleaned.trim();
   return cleaned || 'Geral';
-}
-
-function isValidInspectionItem(text, fullRow) {
-  if (!text) return false;
-  
-  const cleaned = text.trim();
-  if (cleaned.length < 5) return false;
-  
-  const ignorePatterns = [
-    /^PONTUAÇÃO/i, /^TOTAL/i, /^DATA/i, /^Sistemas de pontos/i,
-    /^Excelente/i, /^Acima da média/i, /^média/i, /^Deficiente/i,
-    /^Mau/i, /^Relatório/i, /^inspeção/i, /^PESSOAL/i,
-    /^EXTERIOR/i, /^INTERIOR/i, /^GABINETES/i, /^CARPETE/i,
-    /^CHÃO/i, /^PAREDES/i, /^MÓVEIS/i, /^COPAS/i,
-    /^CASAS DE BANHO/i, /^CORREDORES/i, /^ELEVADORES/i,
-    /^ESCADAS/i, /^JARDIM/i, /^PISCINA/i, /^RECEPÇÃO/i,
-    /^SALA DE AULAS/i, /^ADMINISTRAÇÃO/i,
-    /^PARQUE DE ESTACIONAMENTO/i, /^DEPOSITO DE LIXO/i,
-    /^DRENOS/i, /^GINÁSIO/i, /^BALNEARIOS/i, /^ENTRADA/i,
-    /^RECEPÇÃO E CORREDORES/i, /^CHÃO TIJOLEIRAS/i,
-    /^CHÃO DIFICIL/i, /^SALA DE JOGOS/i, /^CENTRO SOCIAL/i,
-    /^MÓVEIS E OUTROS DECORATIVOS/i, /^MÓVEIS E OTROS DECORATIVOS/i
-  ];
-  
-  for (const pattern of ignorePatterns) {
-    if (pattern.test(cleaned)) {
-      return false;
-    }
-  }
-  
-  const keywords = ['limpo', 'livre', 'regularmente', 'manchas', 'poeira', 'teias', 
-                    'limpos', 'estão', 'está', 'aspirado', 'varrido', 'lavado',
-                    'polidos', 'limpas', 'limpeza', 'organizado'];
-  const hasKeyword = keywords.some(kw => cleaned.toLowerCase().includes(kw));
-  
-  if (cleaned.includes('?') || hasKeyword) {
-    return true;
-  }
-  
-  if ((cleaned.includes('está') || cleaned.includes('estão')) && cleaned.length > 15) {
-    return true;
-  }
-  
-  if (cleaned.length > 20) {
-    return true;
-  }
-  
-  return false;
 }
 
 function cleanItemLabel(text) {

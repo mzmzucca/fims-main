@@ -18,8 +18,12 @@ export function SupabaseSync({ onSyncComplete }) {
   }, []);
 
   const checkConnection = async () => {
-    const result = await templateService.checkConnection();
-    setIsConnected(result.success);
+    try {
+      const result = await templateService.checkConnection();
+      setIsConnected(result.success);
+    } catch (e) {
+      setIsConnected(false);
+    }
   };
 
   const loadLocalTemplates = () => {
@@ -29,9 +33,15 @@ export function SupabaseSync({ onSyncComplete }) {
   };
 
   const loadSupabaseTemplates = async () => {
-    const result = await templateService.fetchAllTemplates();
-    if (result.success) {
-      setSupabaseTemplates({ templates: result.templates, clients: result.clients });
+    try {
+      if (templateService.fetchAllTemplates) {
+        const result = await templateService.fetchAllTemplates();
+        if (result.success) {
+          setSupabaseTemplates({ templates: result.templates, clients: result.clients });
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao carregar templates do Supabase:", e);
     }
   };
 
@@ -41,25 +51,25 @@ export function SupabaseSync({ onSyncComplete }) {
     setProgress({ processed: 0, total: 0, success: 0, failed: 0 });
 
     try {
-      // Configurar callback de progresso
-      templateService.setProgressCallback((p) => {
-        setProgress(p);
-      });
+      if (templateService.setProgressCallback) {
+        templateService.setProgressCallback((p) => {
+          setProgress(p);
+        });
+      }
 
       const result = await templateService.syncLocalTemplates();
 
       if (result.success) {
         setSyncStatus({
           type: 'success',
-          message: `✅ Sincronização concluída! ${result.results.success.length} templates enviados com sucesso.`,
-          details: result.results
+          message: `✅ Sincronização concluída! ${result.count || 'Os'} templates foram enviados com sucesso.`
         });
         await loadSupabaseTemplates();
         if (onSyncComplete) onSyncComplete(result);
       } else {
         setSyncStatus({
           type: 'error',
-          message: `❌ Erro ao sincronizar: ${result.error}`
+          message: `❌ Erro ao sincronizar: ${result.error || 'Erro desconhecido'}`
         });
       }
     } catch (error) {
@@ -82,14 +92,14 @@ export function SupabaseSync({ onSyncComplete }) {
       if (result.success) {
         setSyncStatus({
           type: 'success',
-          message: `✅ Sincronização concluída! ${result.total} templates baixados do Supabase.`
+          message: `✅ Sincronização concluída! ${result.total || 'Os'} templates baixados do Supabase.`
         });
         loadLocalTemplates();
         if (onSyncComplete) onSyncComplete(result);
       } else {
         setSyncStatus({
           type: 'error',
-          message: `❌ Erro ao sincronizar: ${result.error}`
+          message: `❌ Erro ao sincronizar: ${result.error || 'Erro desconhecido'}`
         });
       }
     } catch (error) {
@@ -217,21 +227,6 @@ export function SupabaseSync({ onSyncComplete }) {
       {syncStatus && (
         <div className={`sync-status ${syncStatus.type}`}>
           <p>{syncStatus.message}</p>
-          {syncStatus.details && (
-            <div className="sync-details">
-              <div>Enviados: {syncStatus.details.success.length}</div>
-              {syncStatus.details.failed.length > 0 && (
-                <div className="failed-list">
-                  <strong>Falhas:</strong>
-                  <ul>
-                    {syncStatus.details.failed.map((f, i) => (
-                      <li key={i}>{f.name}: {f.error}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -427,20 +422,6 @@ export function SupabaseSync({ onSyncComplete }) {
 
         .sync-status p {
           margin: 0 0 8px 0;
-        }
-
-        .sync-details {
-          font-size: 14px;
-        }
-
-        .failed-list {
-          margin-top: 8px;
-        }
-
-        .failed-list ul {
-          margin: 4px 0;
-          padding-left: 20px;
-          color: #991B1B;
         }
 
         .connection-error {

@@ -1,6 +1,5 @@
 // src/pages/InspectionForm.jsx
 // Substituir o componente inteiro
-
 import { useState, useEffect } from "react";
 import { Icon } from "../lib/icons";
 import { calcScore, isItemComplete, getCategoryHealth, generateAISummary } from "../lib/helpers";
@@ -12,7 +11,6 @@ import VoiceInput from "../components/VoiceInput";
 
 export default function InspectionForm({ inspection, onSave, onSubmit, onBack, allInspections }) {
   const draftKey = `fims_draft_${inspection.id}`;
-
   const [items, setItems] = useState([]);
   const [sections, setSections] = useState([]);
   const [notes, setNotes] = useState("");
@@ -23,11 +21,9 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [isLoadingTemplate, setIsLoadingTemplate] = useState(false);
   const [templateSource, setTemplateSource] = useState("");
-
   const [clientMgrName, setClientMgrName] = useState("");
   const [inspectorSig, setInspectorSig] = useState("");
   const [clientSig, setClientSig] = useState("");
-
   const [gpsCoords, setGpsCoords] = useState(null);
   const [showRefModal, setShowRefModal] = useState(null);
   const [refPhotos, setRefPhotos] = useState([]);
@@ -43,7 +39,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
         setTemplateSource("inspeção");
         return;
       }
-
       // Verificar draft salvo
       try {
         const saved = localStorage.getItem(draftKey);
@@ -62,7 +57,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
           }
         }
       } catch (e) {}
-
       // Buscar template - PRIMEIRO LOCALSTORAGE, DEPOIS SUPABASE
       setIsLoadingTemplate(true);
       console.log('[InspectionForm] Buscando template para:', inspection.location_name);
@@ -124,7 +118,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
         setIsLoadingTemplate(false);
       }
     }
-
     loadTemplate();
   }, [inspection.id, inspection.location_name]);
 
@@ -167,7 +160,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
       setPhotosByItem(inspection.photosByItem);
       return;
     }
-
     // 2. Verificar rascunho local
     try {
       const savedDraft = localStorage.getItem(draftKey);
@@ -179,7 +171,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
         }
       }
     } catch (e) {}
-
     // 3. Fallback: Buscar do Supabase Storage (para inspeções antigas)
     photoStore.listByInspection(inspection.id).then(grouped => {
       if (cancelled) return;
@@ -253,16 +244,13 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
       const sItems = items.filter(i => i.section_id === section.id);
       const secData = sections.find(s => s.id === section.id) || { observation: "" };
       const secErrors = [];
-
       if (!secData.observation || !secData.observation.trim()) {
         secErrors.push("Category observation is missing (Mandatory).");
       }
-
       const catPhotos = photosByItem[section.id] || [];
       if (catPhotos.length < 3) {
         secErrors.push(`Category requires at least 3 photos (has ${catPhotos.length}).`);
       }
-
       sItems.forEach(item => {
         if (item.score === null) {
           secErrors.push(`Item unanswered: "${item.label || item.text}".`);
@@ -271,25 +259,21 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
             secErrors.push(`Note missing for: "${item.label || item.text}" (Score ${item.score}).`);
           }
           const itemPhotos = photosByItem[item.id] || [];
-          if (itemPhotos.length < 3) {
-            secErrors.push(`3 photos required for: "${item.label || item.text}" (Score ${item.score}).`);
+          if (itemPhotos.length < 1) {
+            secErrors.push(`1 photo required for: "${item.label || item.text}" (Score ${item.score}).`);
           }
         }
       });
-
       if (secErrors.length > 0) {
         errors.push({ section: section.title || section.name || 'Seção', id: section.id, errors: secErrors });
       }
     });
-
     if (!clientMgrName.trim()) errors.push({ section: "Signatures", id: "sig", errors: ["Client Supervisor Name is missing."] });
     if (!inspectorSig || !clientSig) errors.push({ section: "Signatures", id: "sig", errors: ["Signatures are not confirmed."] });
-
     if (errors.length > 0) {
       setValidationErrors(errors);
       return;
     }
-
     const clearedItems = items.map(i => i.qc_comment ? { ...i, qc_comment: null } : i);
     const pct = calcScore(clearedItems);
     const alertLevel = pct < 60 ? "critical" : pct < 75 ? "warning" : "ok";
@@ -477,7 +461,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                   <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: health.color, color: "#fff" }}>{health.risk}</span>
                 </div>
               </div>
-
               {isExpanded && (
                 <div style={{ padding: 16 }}>
                   <div style={{ background: "#F8F7F4", padding: 12, borderRadius: 8, marginBottom: 16 }}>
@@ -499,13 +482,12 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                       isRequired={true} 
                     />
                   </div>
-
                   {sItems.map(item => {
                     const itemComplete = isItemComplete(item, photoCount(item.id));
                     const scored = item.score !== null;
                     const isLowScore = scored && item.score <= 3;
                     const needsNote = isLowScore && !item.comment?.trim();
-                    const needsPhotos = isLowScore && photoCount(item.id) < 3;
+                    const needsPhotos = isLowScore && photoCount(item.id) < 1;
                     
                     return (
                       <div key={item.id} className={`checklist-item ${scored ? "scored" : ""} ${itemComplete ? "complete" : needsNote || needsPhotos ? "needs-note" : ""}`}>
@@ -520,7 +502,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                             <div style={{ fontSize: 12, color: "#A32D2D" }}>{item.qc_comment}</div>
                           </div>
                         )}
-
                         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                           <div style={{ display: "flex", gap: 4 }}>
                             {[1, 2, 3, 4, 5].map(n => (
@@ -531,7 +512,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                             <Icon name="eye" size={12} /> Ref
                           </button>
                         </div>
-
                         <div style={{ marginBottom: 8 }}>
                           <VoiceInput 
                             placeholder={isLowScore ? "Observations (Mandatory for low scores)..." : "Observations (Optional)..." }
@@ -540,7 +520,6 @@ export default function InspectionForm({ inspection, onSave, onSubmit, onBack, a
                             style={{ fontSize: 12, borderColor: needsNote ? "#A32D2D" : undefined }}
                           />
                         </div>
-
                         {isLowScore && needsPhotos && (
                           <div style={{ fontSize: 11, color: "#A32D2D", fontWeight: 600, marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
                             <Icon name="alert" size={12} /> Photo evidence required for scores 1-3.
