@@ -1,8 +1,6 @@
 // /src/data/constants.js
 import { templateService } from '../services/templateService';
-
 export const ROLES = { ADMIN: "admin", CEO: "ceo", SUPERVISOR: "supervisor", INSPECTOR: "inspector" };
-
 export const SEED_USERS = [
   { id: 1, name: "Sistema Admin", email: "admin@fims.co.mz", role: ROLES.ADMIN, active: true, avatar: "SA" },
   { id: 2, name: "Carlos Machava", email: "ceo@fims.co.mz", role: ROLES.CEO, active: true, avatar: "CM" },
@@ -12,14 +10,12 @@ export const SEED_USERS = [
   { id: 6, name: "Carlos Mondlane", email: "inspector3@fims.co.mz", role: ROLES.INSPECTOR, active: true, avatar: "CM" },
   { id: 7, name: "Rita Macuácua", email: "inspector4@fims.co.mz", role: ROLES.INSPECTOR, active: true, avatar: "RM" },
 ];
-
 export const INSPECTOR_COLORS = {
   4: "#378ADD",
   5: "#0F6E56",
   6: "#534AB7",
   7: "#BA7517"
 };
-
 export const PRIORITY_LEVELS = {
   emergency: { label: "Emergency", color: "#A32D2D" },
   high: { label: "High", color: "#EF9F27" },
@@ -27,7 +23,6 @@ export const PRIORITY_LEVELS = {
   normal: { label: "Normal", color: "#3B6D11" },
   low: { label: "Low", color: "#888888" }
 };
-
 // Lista de localizações
 export const SEED_LOCATIONS = [
   { id: 1, name: "Baker Hughes", address: "Maputo, Moçambique", supervisor_id: 3 },
@@ -80,9 +75,11 @@ export const SEED_LOCATIONS = [
   { id: 48, name: "MC Dermott", address: "Maputo, Moçambique", supervisor_id: 3 },
   { id: 49, name: "Hollard Seguros R/C GA", address: "Maputo, Moçambique", supervisor_id: 3 },
   { id: 50, name: "Hollard Seguros R/C GA 3º Andar", address: "Maputo, Moçambique", supervisor_id: 3 },
-  { id: 51, name: "Hollard Seguros R/C GA 4º Andar", address: "Maputo, Moçambique", supervisor_id: 3 }
+  { id: 51, name: "Hollard Seguros R/C GA 4º Andar", address: "Maputo, Moçambique", supervisor_id: 3 },
+  { id: 52, name: "Radisson", address: "Maputo, Moçambique", supervisor_id: 3 },
+  { id: 53, name: "Ata Construções", address: "Maputo, Moçambique", supervisor_id: 3 },
+  { id: 54, name: "Baia Mall", address: "Maputo, Moçambique", supervisor_id: 3 },
 ];
-
 /**
  * Busca template pelo nome do cliente - VERSÃO ASSÍNCRONA
  * PRIORIDADE: localStorage → Supabase → estático → padrão
@@ -90,7 +87,6 @@ export const SEED_LOCATIONS = [
 export async function getClientTemplateAsync(clientName) {
   return await templateService.getTemplateWithFallback(clientName);
 }
-
 /**
  * Versão síncrona para compatibilidade
  * Usa apenas cache local + estático
@@ -98,7 +94,6 @@ export async function getClientTemplateAsync(clientName) {
 export function getClientTemplate(clientName) {
   return templateService.getFromLocalStorage(clientName) || templateService.getStaticTemplate(clientName);
 }
-
 // Template padrão (lazy)
 let _defaultTemplate = null;
 function getDefaultTemplate() {
@@ -107,7 +102,6 @@ function getDefaultTemplate() {
   }
   return _defaultTemplate;
 }
-
 export const TEMPLATE_SECTIONS = getDefaultTemplate().sections || [];
 export const TOTAL_POSSIBLE = TEMPLATE_SECTIONS.reduce(
   (sum, s) => sum + (s.items ? s.items.reduce((ss, i) => ss + (i.weight || i.max || 1), 0) : 0),

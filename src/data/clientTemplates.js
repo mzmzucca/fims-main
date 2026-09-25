@@ -5,7 +5,6 @@
 // Each template is an object with a "sections" array.
 // The BASE_TEMPLATE is used by most clients; unique clients
 // have their own custom templates with additional sections.
-
 // ---------- BASE TEMPLATE (used by ~25 clients) ----------
 const BASE_TEMPLATE = {
   sections: [
@@ -72,7 +71,6 @@ const BASE_TEMPLATE = {
     }
   ]
 };
-
 // 1. BIOFUND
 const BIOFUND_TEMPLATE = {
   sections: [
@@ -141,7 +139,6 @@ const BIOFUND_TEMPLATE = {
     }
   ]
 };
-
 // 2. BROLL S & C
 const BROLL_TEMPLATE = {
   sections: [
@@ -243,7 +240,6 @@ const BROLL_TEMPLATE = {
     }
   ]
 };
-
 // 3. CASINO
 const CASINO_TEMPLATE = {
   sections: [
@@ -412,7 +408,6 @@ const CASINO_TEMPLATE = {
     }
   ]
 };
-
 // 4. COMMOTOR GMS
 const COMMOTOR_TEMPLATE = {
   sections: [
@@ -496,7 +491,6 @@ const COMMOTOR_TEMPLATE = {
     }
   ]
 };
-
 // 8. SHOPPING 24
 const SHOPPING_24_TEMPLATE = {
   sections: [
@@ -621,17 +615,27 @@ const SHOPPING_24_TEMPLATE = {
     }
   ]
 };
-
 // ------------------------------------------------------------
 // CLIENT TEMPLATES MAP
 // ------------------------------------------------------------
+
 export const CLIENT_TEMPLATES = {
   "Baker Hughes": BASE_TEMPLATE,
   "Bayport": BASE_TEMPLATE,
+  "Biofund": BIOFUND_TEMPLATE,
+  "Broll S & C": BROLL_TEMPLATE,
+  "Casino": CASINO_TEMPLATE,
   "Civitas": BASE_TEMPLATE,
+  "C. Belga": BASE_TEMPLATE,
+  "C. Belga Berreau": BASE_TEMPLATE,
+  "Comité Olímpico": BASE_TEMPLATE,
+  "Commotor GMS": COMMOTOR_TEMPLATE,
+  "Condomínio JN130": BASE_TEMPLATE,
   "EGPAF": BASE_TEMPLATE,
   "ExxonMobil": BASE_TEMPLATE,
   "FCDO": BASE_TEMPLATE,
+  "GAPI": BASE_TEMPLATE,
+  "Gestão de Terminais K4": BASE_TEMPLATE,
   "GDA": BASE_TEMPLATE,
   "Hollard Seguros R/C": BASE_TEMPLATE,
   "Hollard Seguros 4º": BASE_TEMPLATE,
@@ -640,28 +644,38 @@ export const CLIENT_TEMPLATES = {
   "ISCTEM 2": BASE_TEMPLATE,
   "Karingani": BASE_TEMPLATE,
   "Multi Choice Torres Rani": BASE_TEMPLATE,
+  "Pronova": BASE_TEMPLATE,
+  "Radisson": BASE_TEMPLATE,
+  "Shopping 24": SHOPPING_24_TEMPLATE,
   "Siemens": BASE_TEMPLATE,
   "SIP": BASE_TEMPLATE,
+  "Tec. Indus. Museu": BASE_TEMPLATE,
+  "Techvision Alto Maé": BASE_TEMPLATE,
+  "Techvision Import": BASE_TEMPLATE,
+  "Techvision Group": BASE_TEMPLATE,
+  "Torre Azul": BASE_TEMPLATE,
+  "Torre Indico": BASE_TEMPLATE,
+  "Torres Rani": BASE_TEMPLATE,
   "Torres VBC-INSS": BASE_TEMPLATE,
+  "Xiluva": BASE_TEMPLATE,
   "Zimpeto Square": BASE_TEMPLATE,
+  "Broll Acacia Estate": BASE_TEMPLATE,
+  "Jogabet": BASE_TEMPLATE,
   "Multi Choice Maputo": BASE_TEMPLATE,
   "Kactus": BASE_TEMPLATE,
-  "MC Dermott": BASE_TEMPLATE,
   "Motraco": BASE_TEMPLATE,
   "Gestfuel Mussumbuluco": BASE_TEMPLATE,
   "Gestfuel Estrada Velha": BASE_TEMPLATE,
-  "Broll Acacia Estate": BASE_TEMPLATE,
-  "Pronova": BASE_TEMPLATE,
-  "Tec. Indus. Museu": BASE_TEMPLATE,
-  "C. Belga": BASE_TEMPLATE,
-  "C. Belga Berreau": BASE_TEMPLATE,
-  
-  "Biofund": BIOFUND_TEMPLATE,
-  "Broll S & C": BROLL_TEMPLATE,
-  "Casino": CASINO_TEMPLATE,
-  "Commotor GMS": COMMOTOR_TEMPLATE,
-  "Shopping 24": SHOPPING_24_TEMPLATE,
+  "Aura Residence": BASE_TEMPLATE,
+  "MC Dermott": BASE_TEMPLATE,
+  "Hollard Seguros R/C GA": BASE_TEMPLATE,
+  "Hollard Seguros R/C GA 3º Andar": BASE_TEMPLATE,
+  "Hollard Seguros R/C GA 4º Andar": BASE_TEMPLATE,
+  "RADISSON": BASE_TEMPLATE,
+  "ATA CONSTRUÇÕES": BASE_TEMPLATE,
+  "BAIA MALL": BASE_TEMPLATE,
 };
+
 
 // ------------------------------------------------------------
 // HELPER: getTemplate(clientName)

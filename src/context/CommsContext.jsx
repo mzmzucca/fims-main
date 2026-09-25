@@ -8,7 +8,7 @@ const CommsContext = createContext();
 // Chaves para localStorage
 const STORAGE_KEYS = {
   MESSAGES: "fims_messages",
-  NOTIFICATIONS: "fims_notifs",
+  NOTIFICATIONS: "fims_notifications",
   DRAFT: "fims_messages_draft",
   ANNOUNCEMENTS: "fims_announcements",
   DISMISSED: "fims_dismissed"
