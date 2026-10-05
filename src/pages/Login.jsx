@@ -3,6 +3,7 @@ import { useState } from "react";
 import { SEED_USERS } from "../data/constants";
 import { Icon } from "../lib/icons";
 import { authService } from "../services/authService";
+import logoUrl from "../LOGO.png"; // Importação do seu logótipo
 
 export default function Login({ onLogin }) {
   const [email, setEmail] = useState("");
@@ -58,11 +59,10 @@ export default function Login({ onLogin }) {
   return (
     <div className="login-page">
       <div className="login-card">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: "#1E2A3A", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Icon name="clipboard" size={20} style={{ color: "#fff" }} />
-          </div>
-          <div>
+        {/* LOGOTIPO ADICIONADO AQUI */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 20 }}>
+          <img src={logoUrl} alt="Nemchem Logo" style={{ height: 70, width: 'auto', marginBottom: 10 }} />
+          <div style={{ textAlign: 'center' }}>
             <div className="login-logo">FIMS</div>
             <div className="login-sub">Field Inspection Management</div>
           </div>

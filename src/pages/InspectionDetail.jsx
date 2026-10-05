@@ -1,6 +1,7 @@
 // /src/pages/InspectionDetail.jsx
 import { useState, useEffect } from "react";
 import { jsPDF } from "jspdf";
+import logoUrl from '../LOGO.png';
 import { Icon } from "../lib/icons";
 import ScoreRing from "../components/ScoreRing";
 import StatusBadge from "../components/StatusBadge";
@@ -155,16 +156,40 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
       const doc = new jsPDF();
       const ai = generateAISummary(inspection.items, inspection.location_name);
       
-      // Header
+      // Buscar a imagem do logo e converter para DataURL
+      let logoDataUrl = null;
+      try {
+        const response = await fetch(logoUrl);
+        const blob = await response.blob();
+        logoDataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+      } catch(e) { console.warn("Erro ao carregar logo:", e); }
+
+      // Header com Logo
       doc.setFillColor(30, 42, 58); 
       doc.rect(0, 0, 210, 30, 'F');
+
+      // Adicionar Logo (se carregado)
+      if (logoDataUrl) {
+        try {
+          // Fundo branco atrás do logo para destacar
+          doc.setFillColor(255, 255, 255); 
+          doc.roundedRect(13, 6, 34, 18, 2, 2, 'F');
+          // Inserir a imagem do logo
+          doc.addImage(logoDataUrl, 'PNG', 15, 8, 30, 14);
+        } catch(e) { console.warn("Erro ao adicionar logo ao PDF:", e); }
+      }
+
       doc.setTextColor(255, 255, 255); 
       doc.setFontSize(20); 
       doc.setFont("helvetica", "bold");
-      doc.text("Relatório de Inspeção", 105, 15, { align: "center" });
+      doc.text("Relatório de Inspeção", 105, 18, { align: "center" });
       doc.setFontSize(10); 
       doc.setFont("helvetica", "normal");
-      doc.text("NEMCHEM - Field Inspection Management System", 105, 22, { align: "center" });
+      doc.text("NEMCHEM - Field Inspection Management System", 105, 25, { align: "center" });
       // Info Box
       doc.setFillColor(248, 247, 244); 
       doc.roundedRect(14, 35, 182, 30, 3, 3, 'F');
@@ -637,8 +662,8 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
                   )}
                   
                   {sItems.map(item => (
-                    <div key={item.id} style={{ 
-                      padding: "8px 0", 
+                    <div key={item.id} style={{
+                      padding: "8px 0",
                       borderBottom: "0.5px solid rgba(0,0,0,0.05)",
                       display: "flex",
                       flexWrap: "wrap",
@@ -646,46 +671,47 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
                       justifyContent: "space-between",
                       gap: 8
                     }}>
-                      <div style={{ flex: 1, fontSize: 13, color: "#444", minWidth: 150 }}>
+                      <div style={{ flex: 1, fontSize: 14, color: "#444", minWidth: 150 }}>
                         {item.label || item.text || "Item"}
                       </div>
+
                       {item.score !== null ? (
-                        <div style={{ 
-                          display: "flex", 
-                          gap: 8, 
-                          alignItems: "center", 
-                          minWidth: 110, 
+                        <div style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          minWidth: 110,
                           justifyContent: "flex-end"
                         }}>
-                          <div style={{ 
-                            width: 28, 
-                            height: 28, 
-                            borderRadius: 6, 
-                            display: "flex", 
-                            alignItems: "center", 
-                            justifyContent: "center", 
-                            fontSize: 12, 
-                            fontWeight: 600, 
-                            color: "#fff", 
-                            background: ["#A32D2D", "#993C1D", "#BA7517", "#3B6D11", "#0F6E56"][item.score - 1] 
+                          <div style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 6,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 14,
+                            fontWeight: 600,
+                            color: "#fff",
+                            background: ["#A32D2D", "#993C1D", "#BA7517", "#3B6D11", "#0F6E56"][item.score - 1]
                           }}>
                             {item.score}
                           </div>
-                          <span style={{ fontSize: 11, color: "#888", width: 70, textAlign: "left" }}>
+                          <span style={{ fontSize: 14, color: "#888", width: 70, textAlign: "left" }}>
                             {["Mau", "Deficiente", "Média", "Bom", "Excelente"][item.score - 1]}
                           </span>
                         </div>
                       ) : (
-                        <span style={{ fontSize: 12, color: "#B4B2A9", minWidth: 110, textAlign: "right" }}>N/A</span>
+                        <span style={{ fontSize: 14, color: "#B4B2A9", minWidth: 110, textAlign: "right" }}>N/A</span>
                       )}
-                      
+
                       {item.comment && (
-                        <div style={{ width: '100%', fontSize: 12, color: '#666', background: '#F8F7F4', padding: '6px 10px', borderRadius: 6, marginTop: 4 }}>
+                        <div style={{ width: '100%', fontSize: 13, color: '#666', background: '#F8F7F4', padding: '6px 10px', borderRadius: 6, marginTop: 4 }}>
                           📝 {item.comment}
                         </div>
                       )}
                       {item.qc_comment && (
-                        <div style={{ width: '100%', fontSize: 12, color: '#A32D2D', background: '#FCEBEB', padding: '6px 10px', borderRadius: 6, marginTop: 4, borderLeft: "3px solid #A32D2D" }}>
+                        <div style={{ width: '100%', fontSize: 13, color: '#A32D2D', background: '#FCEBEB', padding: '6px 10px', borderRadius: 6, marginTop: 4, borderLeft: "3px solid #A32D2D" }}>
                           ⚠️ Correção: {item.qc_comment}
                         </div>
                       )}
@@ -1111,3 +1137,4 @@ export default function InspectionDetail({ inspection, currentUser, onBack, onUp
     </div>
   );
 }
+
