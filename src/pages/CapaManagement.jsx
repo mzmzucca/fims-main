@@ -279,7 +279,7 @@ export default function CapaManagement({ currentUser, users }) {
                           <Icon name="camera" size={12} /> Evidência
                         </button>
                       ) : null}
-                      {isSupervisorOrAhead &&
+                      {isSupervisorOrAbove &&
                       [CAPA_STATUS.OPEN, CAPA_STATUS.IN_PROGRESS, CAPA_STATUS.OVERDUE].includes(capa.status) ? (
                         <button className="btn btn-sm" onClick={() => handleAction("close", capa)} style={{ background: "#0F6E56", color: "#fff" }} title="Fechar CAPA">
                           <Icon name="check" size={12} /> Fechar
